@@ -163,4 +163,4 @@
 
 ## 当前结论
 
-当前文档基线已经按“现代交互、高度客制化、协议与厂商解耦、官方资料持续更新”完成重整。Phase 1 工程骨架和 Phase 2 通用 Rust 流式管道已验证；下一次明确实现应按 [开发路线](./DEVELOPMENT_ROADMAP.md) 只进入 Phase 3 的 SQLite、消息块和可恢复状态，不提前进入真实 Provider、聊天纵切或自动重试。
+当前文档基线已经按“现代交互、高度客制化、协议与厂商解耦、官方资料持续更新”完成重整。Phase 1 工程骨架、Phase 2 通用 Rust 流式管道和 Phase 3 SQLite 数据权威层已验证；下一次明确实现应按 [开发路线](./DEVELOPMENT_ROADMAP.md) 只进入 Phase 4 的 ContextAssembler 与工具连续性 canary，不提前进入真实 Provider、聊天纵切或自动重试。

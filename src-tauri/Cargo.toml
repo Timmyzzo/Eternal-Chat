@@ -17,6 +17,7 @@ tauri-build = { version = "=2.6.3", features = [] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "stream"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 tauri = { version = "=2.11.5", features = [] }
+tauri-plugin-sql = { version = "=2.4.0", features = ["sqlite"] }
 tokio = { version = "=1.53.1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 tokio-util = { version = "=0.7.19", features = ["rt"] }
 

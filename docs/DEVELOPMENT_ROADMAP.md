@@ -142,6 +142,8 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 
 ## Phase 3: SQLite、消息块和可恢复状态
 
+状态：`verified`（2026-07-27）
+
 ### 目标
 
 先建立数据权威层，再接真实模型。
@@ -163,6 +165,16 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 - 分支查询不混 sibling。
 - 启动可恢复 pending。
 - compatibility probe 与 endpoint/model/profile revision 精确关联。
+
+### 退出证据
+
+- tauri-plugin-sql 2.4.0 注册 `sqlite:eternal-chat.db` 和 migration `1 / phase_3_authoritative_schema`；同一 SQL 文件由 Rust migration 与 Node 24 临时 SQLite fixture 共用。
+- migration 建立 10 张项目表、7 个显式索引、16 个完整性/原子写入 trigger 和 3 个无存储 command view；SQLite 计入主键/唯一约束自动索引后共有 19 个索引。
+- repository 覆盖连接/profile/端点/模型/兼容探测/conversation/message/RequestSnapshot/artifact round trip；conversation+虚拟根、user+pending assistant+active leaf、assistant sibling 均以单条 SQLite 语句原子完成。
+- 17 个数据库测试覆盖新库、重复 migration、checksum、迁移失败回滚、临时库清理、跨会话 parent、parent 环、虚拟根、首轮 sibling、active leaf、pending 恢复、500 条消息按 50 条稳定游标分页，以及 snapshot/probe 的 endpoint/model/profile revision 精确关联。
+- 启动入口只在 Tauri 环境加载数据库并把遗留 `pending`/`waiting_retry`/`streaming` assistant 与关联 snapshot 标记为 `interrupted`；已有 blocks 保持，不发起网络或自动重试。
+- `pnpm verify` 通过：27 个 Vitest、5 个契约测试、4 个 Playwright 场景和 22 个 Rust 测试全部成功；`pnpm tauri build --debug --no-bundle`、`git diff --check`、禁止路径检查和敏感信息扫描通过。
+- Rust `pipeline.rs`、DesktopBridge/PipeEvent 契约和 `Other project references/` 无改动；真实 Provider、真实聊天、Protocol codec、ContextAssembler、自动重试、MCP、知识库、云同步、FTS 和导入导出均未提前实现。
 
 ## Phase 4: ContextAssembler 与工具连续性
 
@@ -563,4 +575,4 @@ Cherry 参考文档与差异说明
 
 ## 6. 当前下一步
 
-Phase 2 已完成并验证。下一次明确实现请求应只进入 Phase 3，建立 SQLite migration、消息块、请求快照、分支和可恢复 pending 状态；不要同时提前加入真实 Provider、自动重试、MCP 或知识库。
+Phase 3 已完成并验证。下一次明确实现请求应只进入 Phase 4，建立 ContextAssembler、当前分支读取和工具结果连续性 canary；不要同时提前加入真实 Provider、自动重试、MCP 或知识库。
