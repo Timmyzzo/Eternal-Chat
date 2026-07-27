@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+src-tauri/target/
+.phase1-scaffold/
+Other project references/
+docs/**
+!docs/decisions/
+!docs/decisions/**
+README.md
+ACKNOWLEDGEMENTS.md
+CONTRIBUTING.md
+pnpm-lock.yaml
+src-tauri/Cargo.lock
+THIRD_PARTY_LICENSES.md

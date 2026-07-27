@@ -1,0 +1,154 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-panel: var(--panel);
+  --color-surface: var(--surface);
+  --color-selected: var(--selected);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-focus: var(--focus);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-scrim: var(--scrim);
+  --color-tooltip: var(--tooltip);
+  --color-tooltip-foreground: var(--tooltip-foreground);
+  --shadow-sheet: var(--sheet-shadow);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-optical-sizing: auto;
+  font-synthesis: none;
+  letter-spacing: 0;
+  color: #202326;
+  background: #f7f8fa;
+
+  --background: #f7f8fa;
+  --panel: #f1f3f5;
+  --surface: #ffffff;
+  --selected: #e4e8e9;
+  --foreground: #202326;
+  --muted-foreground: #687078;
+  --border: #dce1e3;
+  --focus: #167a5a;
+  --accent: #167a5a;
+  --accent-hover: #12694d;
+  --accent-foreground: #ffffff;
+  --scrim: rgb(25 29 31 / 0.28);
+  --tooltip: #262a2c;
+  --tooltip-foreground: #ffffff;
+  --sheet-shadow: -18px 0 50px rgb(31 40 43 / 0.16);
+}
+
+:root.dark {
+  color: #f2f4f4;
+  background: #151718;
+
+  --background: #151718;
+  --panel: #1c1f20;
+  --surface: #222526;
+  --selected: #303536;
+  --foreground: #f2f4f4;
+  --muted-foreground: #a4aaad;
+  --border: #383d3f;
+  --focus: #67d5af;
+  --accent: #67d5af;
+  --accent-hover: #7be0bd;
+  --accent-foreground: #0c2a20;
+  --scrim: rgb(0 0 0 / 0.54);
+  --tooltip: #f0f2f2;
+  --tooltip-foreground: #202326;
+  --sheet-shadow: -18px 0 54px rgb(0 0 0 / 0.38);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  min-height: 100%;
+  min-width: 47.5rem;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+textarea {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+[data-slot="button"] {
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration: 110ms;
+  transition-timing-function: ease-out;
+}
+
+[data-slot="button"]:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+::selection {
+  color: var(--accent-foreground);
+  background: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  [data-slot="button"]:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-ui~="settings.view"],
+  [data-ui~="app.content"] > header {
+    background: var(--surface);
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: #757b7e;
+  }
+
+  :root.dark {
+    --border: #b6bbbd;
+  }
+}
