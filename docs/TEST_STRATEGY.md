@@ -139,6 +139,8 @@ UI 只加载最后 50 条，数据库有 500 条。请求构造仍按策略读�
 - done 与 HTTP EOF 不同顺序。
 - 取消与 done 同时发生，终态只写一次。
 - 错误后 Channel、timer、reader 和 running map 清理。
+- `timeoutMs` 对连接/首包和活动流使用 paused/fake time 分别验证，测试不依赖长时间真实 sleep。
+- fake 与真实 Tauri bridge 的 `startStream()` 在 terminal 事件和平台命令都完成前保持 pending；结构化错误 resolve，IPC/Channel 失败 reject。
 - waiting_retry 倒计时、停止和下一 attempt 与 done/cancel 竞态只收敛一次。
 - 30ms 批处理不改变事件顺序。
 - 大 batch 不阻塞停止操作。

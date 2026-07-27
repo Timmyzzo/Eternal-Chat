@@ -42,4 +42,24 @@ describe("Pipe IPC contract", () => {
     expect(contractFixture.request).toEqual(request);
     expect(contractFixture.events).toEqual(events);
   });
+
+  it("adds timeout classification without changing the golden event shape", () => {
+    const event: PipeEvent = {
+      type: "error",
+      requestId: "request-timeout",
+      error: {
+        kind: "timeout",
+        message: "The transport request timed out.",
+      },
+    };
+
+    expect(event).toEqual({
+      type: "error",
+      requestId: "request-timeout",
+      error: {
+        kind: "timeout",
+        message: "The transport request timed out.",
+      },
+    });
+  });
 });

@@ -84,7 +84,7 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 
 ## Phase 2: Rust 通用流式管道
 
-状态：`in_progress`（Phase 2A `verified`，2026-07-27；Phase 2B 待完成）
+状态：`verified`（Phase 2A + Phase 2B，2026-07-27）
 
 ### 目标
 
@@ -118,12 +118,27 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 - Tauri 注册 `start_stream`/`cancel_stream` 命令，前端 `TauriDesktopBridge` 通过 `Channel<PipeEvent>` 转发事件；fake 与真实 bridge 共用同一具体契约。
 - `pnpm verify` 覆盖格式、lint、typecheck、8 个 Vitest、3 个契约测试、生产构建、bundle 预算、4 个 Playwright 场景、Rust fmt/clippy/test 和许可证清单。
 
-#### 明确留给 Phase 2B
+#### Phase 2A 交由 Phase 2B 收口的内容（现已完成）
 
 - 约 30ms 或 64 个 data 事件合批及最后非空 batch 顺序。
 - 随机/单字节分片、多事件同 chunk、CR/LF 边界、注释、heartbeat 和空 data。
 - 取消、完成、超时、断流和 Channel 关闭竞态，以及 running map/reader/timer 的完整清理证据。
 - 非 2xx 受限错误正文、错误分类和不会泄漏请求 Header/Query/Body 的诊断边界。
+
+### Phase 2B：通用流式管道加固
+
+状态：`verified`（2026-07-27）
+
+#### 退出证据
+
+- Rust 以 30ms、64 个 data 事件或 256 KiB UTF-8 data payload 为具名边界有序合批；正常 EOF 总是先 flush 最后一个非空 batch，再发送唯一 `done`。
+- 增量 SSE decoder 覆盖单字节和确定性随机分片、同 chunk 多事件、LF/CRLF 跨 chunk、多行/空 data、注释和 heartbeat；超过单事件上限时以 `stream` 失败，不制造超限 batch。
+- request id 注册、重复 ID、未知 ID 取消、连接前/首包前/流中取消、cancel/EOF 竞态和完成后取消均有自动化证据；取消优先于尚未发送的大 batch，终态只产生一次。
+- 成功、无效请求、网络错误、非 2xx、超时、突然断流、取消和 Channel 关闭均清理 running map、response reader、生命周期 timer 和 cancellation token；Channel 关闭后不继续读取或尝试第二次发送。
+- 非 2xx 正文最多读取并回传 16 KiB，错误只包含稳定类别、通用消息、HTTP 状态和经请求值消隐的受限正文；不记录或主动回传请求 Header、Query、Body、认证值或完整 URL。
+- `timeoutMs` 从 attempt 开始覆盖连接、等待响应和活动流，request 阶段与 stream 阶段均使用 Tokio paused time 验证；错误类别为 `invalid_request`、`network`、`http`、`timeout`、`stream`、`cancelled` 和 `channel_closed`。
+- `startStream()` 只有在 terminal `PipeEvent` 已交付且平台命令完成后才 resolve；平台 IPC/Channel 失败才 reject，fake 与真实 Tauri bridge 共用该生命周期语义。
+- TypeScript/Rust golden JSON 未改变；22 个 Rust 测试、10 个 Vitest（其中 5 个契约测试）和 4 个 Playwright 场景通过，`pnpm verify`、`pnpm tauri build --debug --no-bundle`、`git diff --check`、Rust 业务词扫描和敏感信息扫描均通过。
 
 ## Phase 3: SQLite、消息块和可恢复状态
 
@@ -548,4 +563,4 @@ Cherry 参考文档与差异说明
 
 ## 6. 当前下一步
 
-Phase 2A 已完成。下一次明确实现请求应只进入 Phase 2B，完成假 SSE 分片与合批、取消/完成竞态、非 2xx/超时/断流、Channel 关闭和资源清理；不要同时提前加入真实 Provider、SQLite 全量 schema、MCP 或知识库。
+Phase 2 已完成并验证。下一次明确实现请求应只进入 Phase 3，建立 SQLite migration、消息块、请求快照、分支和可恢复 pending 状态；不要同时提前加入真实 Provider、自动重试、MCP 或知识库。

@@ -41,7 +41,23 @@ export class TauriDesktopBridge implements DesktopBridge {
   }
 
   async startStream(request: PipeRequest, onEvent: (event: PipeEvent) => void) {
-    const channel = this.ipc.createChannel(onEvent);
-    await this.ipc.invoke<void>("start_stream", { request, onEvent: channel });
+    let resolveTerminal!: () => void;
+    const terminal = new Promise<void>((resolve) => {
+      resolveTerminal = resolve;
+    });
+    const channel = this.ipc.createChannel<PipeEvent>((event) => {
+      try {
+        onEvent(event);
+      } finally {
+        if (event.type === "done" || event.type === "error") {
+          resolveTerminal();
+        }
+      }
+    });
+
+    await Promise.all([
+      this.ipc.invoke<void>("start_stream", { request, onEvent: channel }),
+      terminal,
+    ]);
   }
 }

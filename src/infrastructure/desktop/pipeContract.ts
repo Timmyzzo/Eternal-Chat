@@ -14,7 +14,7 @@ export interface PipeRequest {
 }
 
 export type PipeErrorKind =
-  "invalid_request" | "network" | "http" | "cancelled" | "stream" | "channel_closed";
+  "invalid_request" | "network" | "http" | "timeout" | "cancelled" | "stream" | "channel_closed";
 
 export interface PipeError {
   body?: string;

@@ -24,6 +24,7 @@ class TestIpc implements TauriIpc {
   }> = [];
 
   private readonly channels: Array<TestChannel<unknown>> = [];
+  private completeStartInvocation?: () => void;
 
   createChannel<T>(onmessage: (message: T) => void): TauriChannel<T> {
     const channel = new TestChannel(onmessage);
@@ -35,14 +36,25 @@ class TestIpc implements TauriIpc {
     return this.channels.at(-1) as TestChannel<T>;
   }
 
-  async invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  completeStart() {
+    this.completeStartInvocation?.();
+    this.completeStartInvocation = undefined;
+  }
+
+  invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     this.invocations.push({ command, args });
-    return undefined as T;
+    if (command !== "start_stream") {
+      return Promise.resolve(undefined as T);
+    }
+
+    return new Promise<T>((resolve) => {
+      this.completeStartInvocation = () => resolve(undefined as T);
+    });
   }
 }
 
 describe("TauriDesktopBridge contract", () => {
-  it("uses the registered Tauri commands and forwards Channel events", async () => {
+  it("uses the registered commands and waits for both command and terminal event", async () => {
     const ipc = new TestIpc();
     const notifications = new FakeNotificationPort();
     const openedUrls: string[] = [];
@@ -68,10 +80,23 @@ describe("TauriDesktopBridge contract", () => {
       requestId: request.requestId,
       data: ["raw-event"],
     };
+    const terminal: PipeEvent = {
+      type: "done",
+      requestId: request.requestId,
+    };
 
-    await bridge.startStream(request, onEvent);
+    let settled = false;
+    const start = bridge.startStream(request, onEvent).then(() => {
+      settled = true;
+    });
     const channel = ipc.latestChannel<PipeEvent>();
     channel.emit(event);
+    ipc.completeStart();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    channel.emit(terminal);
+    await start;
     await bridge.cancelStream(request.requestId);
     await bridge.openExternal("https://example.com");
     await bridge.notifications.show({ title: "Done" });
@@ -86,8 +111,39 @@ describe("TauriDesktopBridge contract", () => {
         args: { requestId: request.requestId },
       },
     ]);
-    expect(onEvent).toHaveBeenCalledWith(event);
+    expect(onEvent.mock.calls).toEqual([[event], [terminal]]);
+    expect(settled).toBe(true);
     expect(openedUrls).toEqual(["https://example.com"]);
     expect(notifications.shown).toEqual([{ title: "Done" }]);
+  });
+
+  it("keeps startStream pending until the command completes after a terminal event", async () => {
+    const ipc = new TestIpc();
+    const bridge = new TauriDesktopBridge(
+      {
+        notifications: new FakeNotificationPort(),
+        async openExternal() {},
+      },
+      ipc,
+    );
+    const request: PipeRequest = {
+      requestId: "request-command-lifecycle",
+      url: "http://127.0.0.1:43123/stream",
+      method: "GET",
+      headers: [],
+      query: [],
+    };
+    let settled = false;
+    const start = bridge.startStream(request, vi.fn()).then(() => {
+      settled = true;
+    });
+
+    ipc.latestChannel<PipeEvent>().emit({ type: "done", requestId: request.requestId });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    ipc.completeStart();
+    await start;
+    expect(settled).toBe(true);
   });
 });

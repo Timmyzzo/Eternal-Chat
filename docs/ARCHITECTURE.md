@@ -238,12 +238,14 @@ MVP Rust command 保持极少：
 
 | Command | 输入 | 输出 |
 |---|---|---|
-| `sse_request` | transport request id、最终 URL、method、Header、Query、Body、单次 attempt 超时配置、Channel | `batch`、`done`、`error` |
-| `sse_cancel` | request id | 无或取消结果 |
+| `start_stream` | transport request id、最终 URL、method、Header、Query、Body、单次 attempt 超时配置、Channel | `data` batch、`done`、`error` |
+| `cancel_stream` | request id | 无或取消结果 |
 
 TypeScript 的 `ProviderConnection + EndpointConfig + ProtocolProfile + ModelConfig + ConversationOverride` 负责得到最终请求。Rust 不接受 `providerId`、`vendorHint`、`authStyle` 或模型公司作为路由依据，也不补写、删除或改名任何业务字段。
 
 Rust 每次只执行一个 attempt，不决定是否重试、重试哪些状态、等待多久或是否已经出现语义输出。RetryPolicy、错误分类和定时编排全部在 TypeScript 应用层，避免把 Provider 业务扩散进 Rust。
+
+`DesktopBridge.startStream()` 的 Promise 表示 transport command 的完整生命周期：只有 terminal `PipeEvent` 已交付且 Rust 已完成资源清理后才 resolve；正常 `done` 和结构化 `error` 都通过 Channel 交付并 resolve，只有 IPC 或 Channel 自身失败才 reject。fake bridge 必须保持相同语义，不能在注册 listener 后立即 resolve。
 
 ## 10. 协议 profile 与 codec
 

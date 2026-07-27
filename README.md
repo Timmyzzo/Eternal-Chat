@@ -4,7 +4,7 @@
 
 Eternal Chat 是一个以“模型能力不被客户端偷偷削弱”为首要原则的现代 AI 对话桌面客户端。它同时强调高自由度：中转站、端口、协议、端点、模型能力、参数名、参数路径、工具描述和界面体验都可以由用户配置。项目使用 Tauri 2 作为桌面壳，React + TypeScript 负责界面和业务逻辑，Rust 仅承担通用流式网络管道。
 
-当前仓库已完成 **Phase 1 工程脚手架与质量门禁**，并完成 **Phase 2A 通用传输契约与本地假 SSE 成功链路**：Tauri 2 + React 19 + TypeScript + Vite 工作区、真实 Tauri `DesktopBridge` 流式适配、Rust HTTP/SSE 管道、共享跨语言契约、本地随机端口 fixture 和统一 `pnpm verify` 已建立。真实 Provider、SQLite 和聊天业务仍未开始；30ms 合批、完整取消/超时/错误与资源清理留在 Phase 2B，安全与隐私专题继续为 `deferred`。
+当前仓库已完成 **Phase 1 工程脚手架与质量门禁**和 **Phase 2 Rust 通用流式管道**：Tauri 2 + React 19 + TypeScript + Vite 工作区、真实 Tauri `DesktopBridge` 流式适配、共享跨语言契约、Rust HTTP/SSE 管道、30ms/64 事件有序合批、取消/超时/错误分类、受限非 2xx 正文、断流与资源清理均已用本地随机端口 fixture 验证。真实 Provider、SQLite 和聊天业务仍未开始，安全与隐私专题继续为 `deferred`。
 
 ## 项目要解决的问题
 
@@ -139,10 +139,10 @@ Eternal Chat 的本地 `main` 仓库已经初始化并关联 [Timmyzzo/Eternal-C
 | 当前拆分规范 baseline | 已建立，作为唯一设计基线 |
 | 官方文档持续追踪规则 | 已建立 |
 | 应用脚手架 | Phase 1 已验证：Windows 启动、深浅主题、小窗口、MSI/NSIS 打包 |
-| 通用网络管道 | Phase 2A 已验证：请求透传、原始 SSE 顺序、Tauri Channel 契约和本地 fixture；Phase 2B 加固待完成 |
+| 通用网络管道 | Phase 2 已验证：请求透传、增量 SSE、30ms/64 事件/256 KiB 合批、取消/超时/错误、Channel 与资源清理 |
 | 业务代码 | 真实聊天、Provider 和 SQLite 未开始 |
 | 自动化测试 | Vitest、共享 IPC 契约、Rust 本地 HTTP/SSE 集成测试、Playwright、clippy 与 bundle 门禁已建立 |
 | Git 仓库 | 本地 `main` 已关联 `origin/main`，Phase 1 基线已经提交并推送 |
 | 开源许可证 | 待项目所有者在发布前决定 |
 
-Phase 1 的工具链、依赖与 Motion 决定见 [ADR 0001](./docs/decisions/0001-phase-1-toolchain-and-motion.md)。下一次实现应按 [开发路线](./docs/DEVELOPMENT_ROADMAP.md#phase-2-rust-通用流式管道) 只进入 Phase 2B，完成合批、取消、错误和资源清理；不得提前加入真实 Provider 或数据层。
+Phase 1 的工具链、依赖与 Motion 决定见 [ADR 0001](./docs/decisions/0001-phase-1-toolchain-and-motion.md)。下一次实现应按 [开发路线](./docs/DEVELOPMENT_ROADMAP.md#phase-3-sqlite消息块和可恢复状态) 只进入 Phase 3，建立 SQLite、消息块和可恢复状态；不得同时提前加入真实 Provider、聊天纵切或自动重试。

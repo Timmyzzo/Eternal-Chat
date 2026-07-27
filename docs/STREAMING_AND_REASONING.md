@@ -58,11 +58,14 @@ type StreamEvent =
 
 - 使用 request id 注册取消 token。
 - 只发送 TypeScript 已构造完成的 URL、method、Header、Query 和 Body，不补写认证或改名业务字段。
-- 校验 HTTP 状态并把非成功响应正文作为受限错误片段回传。
-- 按约 30ms 或最大批量 64 个 data 事件合批。
+- 校验 HTTP 状态并把非成功响应正文作为最多 16 KiB 的受限错误片段回传；错误不得拼入请求 Header、Query、Body、认证值或完整 URL。
+- 按 30ms、最大 64 个 data 事件或 256 KiB UTF-8 data payload 三个具名边界有序合批；单个 data 超过上限时返回 `stream`，不拆分原始事件。
 - 取消、断流和正常 EOF 都必须清理 running map。
 - 最后一个非空 batch 必须在 done 前发送。
-- Channel 关闭后停止无意义发送并清理资源。
+- 取消优先于 batch timer 和读取；尚未发出的 pending batch 不得拖延停止。
+- `timeoutMs` 覆盖同一次 attempt 的连接、等待响应、非成功正文读取和活动流生命周期。
+- Channel 关闭后停止无意义读取和发送并清理 reader、timer、取消 token 与 running map。
+- transport 错误稳定区分 `invalid_request`、`network`、`http`、`timeout`、`stream`、`cancelled` 和 `channel_closed`，不在 Rust 解析协议内嵌错误。
 
 ### 4.1 执行所有权与 UI 订阅
 
