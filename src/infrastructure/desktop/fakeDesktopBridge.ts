@@ -3,6 +3,7 @@ import type {
   DesktopNotification,
   NotificationPort,
 } from "@/infrastructure/desktop/desktopBridge";
+import type { PipeEvent, PipeRequest } from "@/infrastructure/desktop/pipeContract";
 
 export class FakeNotificationPort implements NotificationPort {
   readonly shown: DesktopNotification[] = [];
@@ -12,22 +13,19 @@ export class FakeNotificationPort implements NotificationPort {
   }
 }
 
-export class FakeDesktopBridge<TRequest = never, TEvent = never> implements DesktopBridge<
-  TRequest,
-  TEvent
-> {
+export class FakeDesktopBridge implements DesktopBridge {
   readonly cancelledRequestIds: string[] = [];
   readonly notifications = new FakeNotificationPort();
   readonly openedUrls: string[] = [];
-  readonly startedRequests: TRequest[] = [];
+  readonly startedRequests: PipeRequest[] = [];
 
-  private readonly eventListeners = new Set<(event: TEvent) => void>();
+  private readonly eventListeners = new Set<(event: PipeEvent) => void>();
 
   async cancelStream(requestId: string) {
     this.cancelledRequestIds.push(requestId);
   }
 
-  emit(event: TEvent) {
+  emit(event: PipeEvent) {
     this.eventListeners.forEach((listener) => listener(event));
   }
 
@@ -35,7 +33,7 @@ export class FakeDesktopBridge<TRequest = never, TEvent = never> implements Desk
     this.openedUrls.push(url);
   }
 
-  async startStream(request: TRequest, onEvent: (event: TEvent) => void) {
+  async startStream(request: PipeRequest, onEvent: (event: PipeEvent) => void) {
     this.startedRequests.push(request);
     this.eventListeners.add(onEvent);
   }

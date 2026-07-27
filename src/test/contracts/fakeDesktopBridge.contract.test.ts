@@ -1,22 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { FakeDesktopBridge } from "@/infrastructure/desktop";
-
-interface TestRequest {
-  requestId: string;
-}
-
-interface TestEvent {
-  requestId: string;
-  type: "chunk";
-}
+import { FakeDesktopBridge, type PipeEvent, type PipeRequest } from "@/infrastructure/desktop";
 
 describe("FakeDesktopBridge contract", () => {
   it("records platform calls and forwards injected stream events", async () => {
-    const bridge = new FakeDesktopBridge<TestRequest, TestEvent>();
+    const bridge = new FakeDesktopBridge();
     const onEvent = vi.fn();
-    const request = { requestId: "request-1" };
-    const event = { requestId: "request-1", type: "chunk" } as const;
+    const request: PipeRequest = {
+      requestId: "request-1",
+      url: "http://127.0.0.1:43123/stream",
+      method: "POST",
+      headers: [],
+      query: [],
+    };
+    const event: PipeEvent = {
+      requestId: "request-1",
+      type: "data",
+      data: ["chunk"],
+    };
 
     await bridge.startStream(request, onEvent);
     bridge.emit(event);

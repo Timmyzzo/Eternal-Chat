@@ -154,7 +154,7 @@
 
 ## 15. Git 工作流
 
-项目本地 `main` 仓库已经初始化并关联 [Timmyzzo/Eternal-Chat](https://github.com/Timmyzzo/Eternal-Chat)。截至 2026-07-27 远端为空；首次提交和推送仍需项目所有者明确要求：
+项目本地 `main` 仓库已经初始化并关联 [Timmyzzo/Eternal-Chat](https://github.com/Timmyzzo/Eternal-Chat)，Phase 1 基线已经提交并推送。后续提交和推送仍以项目所有者的明确要求为准：
 
 - 提交前检查状态、diff、未跟踪文件、删除和敏感信息。
 - 一个提交保持单一目的。

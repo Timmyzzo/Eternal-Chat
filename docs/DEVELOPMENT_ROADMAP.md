@@ -84,6 +84,8 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 
 ## Phase 2: Rust 通用流式管道
 
+状态：`in_progress`（Phase 2A `verified`，2026-07-27；Phase 2B 待完成）
+
 ### 目标
 
 用本地假 SSE server 证明最终 URL/显式端口/Method/Header/Query/Body、合批、取消、错误和资源清理。
@@ -103,6 +105,25 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 - 高频事件顺序不变。
 - cancel 后 running map、reader 和 Channel 清理。
 - TypeScript 提供的最终 URL、端口、Header、Query 和 Body 被原样发送。
+
+### Phase 2A：传输契约与本地假 SSE 成功链路
+
+状态：`verified`（2026-07-27）
+
+#### 退出证据
+
+- TypeScript 与 Rust 使用同一份 JSON golden fixture 验证 `PipeRequest`、`PipeEvent` 和错误结构；`data` 从第一版即为数组，Phase 2B 可在不改变 IPC shape 的前提下加入合批。
+- Rust `pipeline.rs` 使用最终 URL、Method、Header、Query、Body 和可选 timeout 发起单次 HTTP 请求，不补写认证、不读取 Provider 或模型名称、不解析业务事件。
+- 本地随机显式端口 fixture 捕获并断言现有 Query、重复 Query、Header 和原始 Body；两条 SSE `data` 按序回传，最后发送 `done`。
+- Tauri 注册 `start_stream`/`cancel_stream` 命令，前端 `TauriDesktopBridge` 通过 `Channel<PipeEvent>` 转发事件；fake 与真实 bridge 共用同一具体契约。
+- `pnpm verify` 覆盖格式、lint、typecheck、8 个 Vitest、3 个契约测试、生产构建、bundle 预算、4 个 Playwright 场景、Rust fmt/clippy/test 和许可证清单。
+
+#### 明确留给 Phase 2B
+
+- 约 30ms 或 64 个 data 事件合批及最后非空 batch 顺序。
+- 随机/单字节分片、多事件同 chunk、CR/LF 边界、注释、heartbeat 和空 data。
+- 取消、完成、超时、断流和 Channel 关闭竞态，以及 running map/reader/timer 的完整清理证据。
+- 非 2xx 受限错误正文、错误分类和不会泄漏请求 Header/Query/Body 的诊断边界。
 
 ## Phase 3: SQLite、消息块和可恢复状态
 
@@ -527,4 +548,4 @@ Cherry 参考文档与差异说明
 
 ## 6. 当前下一步
 
-Phase 1 已完成。下一次明确实现请求应只进入 Phase 2 的本地假 SSE 与 Rust 通用流式管道；不要同时提前加入真实 Provider、SQLite 全量 schema、MCP 或知识库。
+Phase 2A 已完成。下一次明确实现请求应只进入 Phase 2B，完成假 SSE 分片与合批、取消/完成竞态、非 2xx/超时/断流、Channel 关闭和资源清理；不要同时提前加入真实 Provider、SQLite 全量 schema、MCP 或知识库。

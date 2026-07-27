@@ -245,12 +245,13 @@ Phase 1 已完成：
 以下验证按开发路线分阶段执行，不把 Phase 2/3/8 的任务提前塞入 Phase 1：
 
 - **Phase 1（已验证）**：Tauri 2 空应用在 Windows 启动、正常关闭、构建并生成 MSI/NSIS；深浅主题、900x700 小窗口、pointer-down、sheet 拖拽和 reduced motion 可用；`DesktopBridge` fake 不调用真实 IPC。
-- **Phase 2**：Rust Channel 高频假 SSE 约 30ms 合批；cancel、timeout、窗口关闭后的运行映射/reader 清理；最终 URL、显式端口、Header、Query 和 Body 原样发送。
+- **Phase 2A（已验证）**：共享 `PipeRequest`/`PipeEvent` fixture、真实 Tauri 流式 bridge、Rust HTTP/SSE 成功路径和随机端口本地 server 已建立；最终 URL、显式端口、Method、Header、Query 和 Body 原样发送，原始 SSE data 顺序不变。
+- **Phase 2B（待完成）**：Rust Channel 高频假 SSE 约 30ms/64 事件合批；cancel、timeout、非 2xx、Channel 关闭后的运行映射/reader 清理，以及随机分片和大 batch 停止延迟。
 - **Phase 3**：tauri-plugin-sql migration、事务、临时数据库 fixture 与 FTS5 能力验证。
 - **Phase 5-6**：多端口/多 profile 与显示品牌和协议不一致的构造请求验证。
 - **Phase 8**：React/Zustand selector 重渲染、markdown-it 缓存和 virtua 动态高度滚动锚点验证。
 
-Phase 1 只保留交互 spike、平台端口 fake 和质量基础设施；后续条目仍是对应 Phase 的未完成任务。
+Phase 1 只保留交互 spike、平台端口 fake 和质量基础设施；Phase 2A 已加入通用传输成功路径，但没有加入 Provider codec、真实聊天或数据层。Phase 2B 及后续条目仍是对应阶段的未完成任务。
 
 ## 15. 替换边界
 
