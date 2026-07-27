@@ -178,6 +178,8 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 
 ## Phase 4: ContextAssembler 与工具连续性
 
+状态：`verified`（2026-07-27）
+
 ### 目标
 
 在任何真实 UI 打磨之前，完成当前项目最重要的 canary。
@@ -200,6 +202,16 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 - 500 条数据库历史不受 UI 50 条窗口影响。
 
 未通过本阶段，不得进入真实多 Provider 扩展。
+
+### 退出证据
+
+- 建立 Provider 无关的 `CanonicalContext`、`CanonicalTurn`、`CanonicalBlock`、`ContextManifest`、稳定 SHA-256 与 `normal/risk/over_limit/uncertain` lossless 预算预检；预检不修改上下文、manifest 或数据库。
+- `Phase3Repository` 使用单次 SQLite 递归 CTE 从 anchor 沿 `parent_id` 读取到虚拟根；ContextAssembler 排除根、按根到叶排序并显式拒绝缺父、环、跨会话、不可达/损坏根、重复 tool-call ID、未完成工具、缺失 `modelContent`、失败无错误内容、未知/不支持块和角色不兼容。
+- OpenAI Chat Completions 与 Responses 仅实现本地最小 serializer；本地 capture boundary 在最终 wire request 层分别证明第二轮保留第一轮完全相同的 tool-call ID 和唯一 canary `modelContent`，没有 Provider/API 调用、parser、Rust 接入或自动重试。
+- 真实临时 SQLite 的 500 条非根消息在模拟 UI 只加载最近 50 条时仍完整进入当前分支上下文，无重复、遗漏或 sibling 污染；RequestSnapshot 对 ContextManifest、context/body hash、connection/endpoint/model/profile revision 完成 round trip。
+- Phase 4 新增 36 个测试；`pnpm verify` 通过 63 个 Vitest、13 个 contract、4 个 Playwright 场景和 22 个 Rust 测试；初始 web assets 为 455.8 KiB raw、143.0 KiB gzip，`pnpm tauri build --debug --no-bundle` 成功生成 debug 应用。
+- migration 保持版本 1，仍为 10 张项目表、7 个显式索引、19 个总索引、16 个 trigger 和 3 个 command view；临时数据库、WAL、SHM 和测试产物已清理。
+- `git diff --check`、敏感信息扫描和从 `ff56cca` 起的禁止路径检查通过；`pipeline.rs`、DesktopBridge/PipeEvent、Phase 3 migration、依赖/lockfile 与 `Other project references/` 无改动。
 
 ## Phase 5: OpenAI 兼容双端点最小聊天纵切
 
@@ -575,4 +587,4 @@ Cherry 参考文档与差异说明
 
 ## 6. 当前下一步
 
-Phase 3 已完成并验证。下一次明确实现请求应只进入 Phase 4，建立 ContextAssembler、当前分支读取和工具结果连续性 canary；不要同时提前加入真实 Provider、自动重试、MCP 或知识库。
+Phase 4 已完成并验证。下一次明确实现请求应只进入 Phase 5 的 OpenAI 兼容双端点最小聊天纵切；不要同时提前加入 Phase 5A 自动重试、MCP、知识库或其他后续模块。

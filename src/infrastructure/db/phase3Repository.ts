@@ -44,6 +44,12 @@ export interface PendingTurn {
   assistantMessage: Message;
 }
 
+export interface MessageParentChain {
+  cycleMessageId: string | null;
+  messages: Message[];
+  missingParentId: string | null;
+}
+
 export class Phase3Repository {
   constructor(private readonly database: SqlDatabase) {}
 
@@ -313,6 +319,45 @@ export class Phase3Repository {
       [id],
     );
     return row ? mapMessage(row) : null;
+  }
+
+  async readMessageParentChain(anchorMessageId: string): Promise<MessageParentChain> {
+    const rows = await this.database.select<MessageParentChainRow>(
+      `WITH RECURSIVE parent_chain AS (
+        SELECT
+          message.*,
+          0 AS depth,
+          json_array(message.id) AS visited_ids,
+          NULL AS cycle_message_id
+        FROM message
+        WHERE message.id = ?
+        UNION ALL
+        SELECT
+          parent.*,
+          child.depth + 1,
+          json_insert(child.visited_ids, '$[#]', parent.id),
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM json_each(child.visited_ids) WHERE value = parent.id
+            ) THEN parent.id
+            ELSE NULL
+          END
+        FROM message AS parent
+        JOIN parent_chain AS child ON parent.id = child.parent_id
+        WHERE child.cycle_message_id IS NULL
+      )
+      SELECT * FROM parent_chain ORDER BY depth`,
+      [anchorMessageId],
+    );
+    const cycleRow = rows.find((row) => row.cycle_message_id !== null);
+    const pathRows = rows.filter((row) => row.cycle_message_id === null);
+    const terminal = pathRows.at(-1);
+
+    return {
+      cycleMessageId: cycleRow?.cycle_message_id ?? null,
+      messages: pathRows.map(mapMessage),
+      missingParentId: cycleRow === undefined && terminal?.parent_id ? terminal.parent_id : null,
+    };
   }
 
   async getConversationRoot(conversationId: string): Promise<Message | null> {
@@ -636,6 +681,12 @@ interface MessageRow {
   request_snapshot_id: string | null;
   created_at: number;
   updated_at: number;
+}
+
+interface MessageParentChainRow extends MessageRow {
+  cycle_message_id: string | null;
+  depth: number;
+  visited_ids: string;
 }
 
 interface RequestSnapshotRow {

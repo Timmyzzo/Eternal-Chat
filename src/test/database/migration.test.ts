@@ -118,12 +118,24 @@ describe("Phase 3 migrations", () => {
     }
   });
 
-  it("removes the temporary database and directory", async () => {
+  it("closes and removes the temporary database, WAL, SHM, and directory", async () => {
     const fixture = await createTempDatabase();
     const { databasePath, directory } = fixture;
-    expect(await pathExists(databasePath)).toBe(true);
-    await fixture.cleanup();
+    const walPath = `${databasePath}-wal`;
+    const shmPath = `${databasePath}-shm`;
+    try {
+      fixture.database.execScript(
+        "PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE sidecar_probe (id INTEGER); INSERT INTO sidecar_probe VALUES (1);",
+      );
+      expect(await pathExists(databasePath)).toBe(true);
+      expect(await pathExists(walPath)).toBe(true);
+      expect(await pathExists(shmPath)).toBe(true);
+    } finally {
+      await fixture.cleanup();
+    }
     expect(await pathExists(databasePath)).toBe(false);
+    expect(await pathExists(walPath)).toBe(false);
+    expect(await pathExists(shmPath)).toBe(false);
     expect(await pathExists(directory)).toBe(false);
   });
 });
