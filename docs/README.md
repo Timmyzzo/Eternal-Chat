@@ -163,4 +163,4 @@
 
 ## 当前结论
 
-当前文档基线已经按“现代交互、高度客制化、协议与厂商解耦、官方资料持续更新”完成重整。Phase 1 工程骨架、Phase 2 通用 Rust 流式管道和 Phase 3 SQLite 数据权威层已验证；下一次明确实现应按 [开发路线](./DEVELOPMENT_ROADMAP.md) 只进入 Phase 4 的 ContextAssembler 与工具连续性 canary，不提前进入真实 Provider、聊天纵切或自动重试。
+当前文档基线已经按“现代交互、高度客制化、协议与厂商解耦、官方资料持续更新”完成重整。Phase 1 工程骨架、Phase 2 通用 Rust 流式管道、Phase 3 SQLite 数据权威层、Phase 4 ContextAssembler 与工具连续性、Phase 5 OpenAI 兼容双端点最小聊天纵切、Phase 5A 自动重试与请求尝试，以及 Phase 6 全量端点、能力、参数与工具目录均已验证。当前按要求停在 Phase 6；Phase 7 结构化思考、搜索和信源尚未开始，也未进入 MCP、知识库或其他后续阶段。

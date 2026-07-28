@@ -267,6 +267,7 @@ function baseConversation(systemPrompt = ""): Conversation {
     extraBody: {},
     extraHeaders: {},
     extraQuery: {},
+    extraPath: {},
     toolsOverride: {},
     contextPolicy: { mode: "lossless" },
     activeLeafMessageId: null,

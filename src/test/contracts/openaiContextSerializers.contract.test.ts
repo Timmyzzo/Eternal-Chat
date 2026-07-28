@@ -240,6 +240,7 @@ async function seedCanaryConversation(repository: Phase3Repository, suffix: stri
     extraBody: {},
     extraHeaders: {},
     extraQuery: {},
+    extraPath: {},
     toolsOverride: {},
     contextPolicy: { mode: "lossless" },
     activeLeafMessageId: null,

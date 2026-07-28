@@ -10,7 +10,7 @@
 
 | 数据 | 存储 | 原因 |
 |---|---|---|
-| 连接、端点、协议 profile、模型、会话、消息、快照 | SQLite | 事务、查询、迁移和索引 |
+| 连接、端点、协议 profile、模型、会话、消息、快照、request attempt、retry policy | SQLite | 事务、查询、迁移和索引 |
 | 认证绑定和值引用 | 配置层 | 字段名、位置、前缀和值来源必须可编辑；具体凭据持久化方案后续决定 |
 | 附件与大型工具结果 | 应用数据目录的内容哈希文件 | 避免 SQLite 大 blob 和重复文件 |
 | UI 临时状态 | 内存，必要时 store/plugin | 不污染领域数据 |
@@ -31,6 +31,8 @@ CREATE TABLE schema_migration (
 ```
 
 应用启动时只允许按版本顺序向前迁移。不得在运行时根据列是否存在散落执行临时修补。
+
+当前已发布迁移保持前向追加：v1 建立 Phase 3 权威 schema；v2 只新增 Phase 5A 的 `request_attempt`、`application_retry_policy` 和相关原子 command view/trigger，不改写 v1。`provider_endpoint.retry_policy_json` 与 `request_snapshot.retry_policy_json` 已由 v1 预留，v2 负责把这些配置接入持久化 attempt 生命周期。
 
 ## 4. 核心表
 
@@ -64,6 +66,7 @@ CREATE TABLE protocol_profile (
   tools_mapping_json TEXT NOT NULL,
   continuation_mapping_json TEXT,
   source_json TEXT,
+  preset_binding_json TEXT,
   user_edited INTEGER NOT NULL DEFAULT 0,
   revision INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
@@ -91,6 +94,9 @@ CREATE TABLE provider_endpoint (
   headers_json TEXT NOT NULL DEFAULT '{}',
   query_json TEXT NOT NULL DEFAULT '{}',
   body_defaults_json TEXT NOT NULL DEFAULT '{}',
+  path_defaults_json TEXT NOT NULL DEFAULT '{}',
+  source_json TEXT,
+  preset_binding_json TEXT,
   timeout_ms INTEGER,
   retry_policy_json TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -116,15 +122,20 @@ CREATE TABLE model (
   display_name TEXT NOT NULL,
   capability_schema_json TEXT NOT NULL DEFAULT '{}',
   params_schema_json TEXT NOT NULL DEFAULT '[]',
+  parameter_values_json TEXT NOT NULL DEFAULT '{}',
   built_in_tools_json TEXT NOT NULL DEFAULT '[]',
+  tool_settings_json TEXT NOT NULL DEFAULT '{}',
   extra_body_json TEXT NOT NULL DEFAULT '{}',
   extra_headers_json TEXT NOT NULL DEFAULT '{}',
   extra_query_json TEXT NOT NULL DEFAULT '{}',
+  extra_path_json TEXT NOT NULL DEFAULT '{}',
   context_window INTEGER,
   max_output_tokens INTEGER,
   protocol_profile_override_id TEXT REFERENCES protocol_profile(id),
   schema_origin TEXT NOT NULL DEFAULT 'user',
   schema_revision INTEGER NOT NULL DEFAULT 1,
+  source_json TEXT,
+  preset_binding_json TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -164,7 +175,7 @@ CREATE INDEX idx_parameter_probe_lookup
   );
 ```
 
-`status` 只允许 `unknown`、`accepted_effective`、`accepted_ignored`、`rejected` 或 `translated`。HTTP 200 不能单独把状态提升为 `accepted_effective`。端点、模型、API version 或 profile revision 变化后，旧证据只能作为历史参考。
+`status` 只允许 `unknown`、`accepted_effective`、`accepted_ignored`、`rejected` 或 `translated`。HTTP 200 不能单独把状态提升为 `accepted_effective`；临时 5xx 或网络错误也不能证明参数被拒绝。端点、模型、API version 或 profile revision 变化后，旧证据只能作为历史参考。Phase 6 的最小探测保存脱敏 request fingerprint、HTTP 状态和错误摘要，不保存凭据或完整敏感请求。
 
 ### 4.6 conversation
 
@@ -273,7 +284,9 @@ CREATE INDEX idx_request_snapshot_conversation_started
 - `retry_policy_json` 保存发送瞬间生效的 policy，等待期间设置变化不回写。
 - 用户手动重新生成创建新的 assistant sibling 和新的 snapshot。
 
-### 4.9 request_attempt
+### 4.9 Phase 5A retry state
+
+#### request_attempt
 
 ```sql
 CREATE TABLE request_attempt (
@@ -312,6 +325,20 @@ CREATE INDEX idx_request_attempt_snapshot_no
 - `first_semantic_event_at` 一旦存在，默认禁止从头自动重试。
 - 错误正文、响应片段和请求明细的保留策略后续决定；attempt 核心字段只要求能证明请求是否变化以及如何结束。
 - Provider 返回 usage/cost 时按实际 attempt 关联保存或聚合；没有证据时不得推断重试是否重复计费。
+
+#### application_retry_policy
+
+```sql
+CREATE TABLE application_retry_policy (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  policy_json TEXT NOT NULL CHECK (
+    json_valid(policy_json) AND json_type(policy_json) = 'object'
+  ),
+  updated_at INTEGER NOT NULL
+);
+```
+
+应用默认 policy 使用单例行保存；endpoint 仍通过 `provider_endpoint.retry_policy_json` 表示完整覆盖或继承应用默认。每个 logical request 在发送时解析最终 policy 并复制到 `request_snapshot.retry_policy_json`，后续设置变化不得改变已冻结请求。
 
 ### 4.10 artifact
 
@@ -520,6 +547,7 @@ ContextAssembler 必须按 parent 链读取到虚拟根并排除根本身。需�
 - Endpoint RetryPolicy 继承/覆盖与模型 preset round trip 保持 `presetBinding` 的 `tracked`/`detached` 模式、`baseRevision`、`overridePatch` 和来源；`userEdited` 只作为显示字段验证，不能代替所有权语义。
 - 同一 model id 在不同 endpoint 上的 capability、parameter 和 compatibility 记录互不串用。
 - `unknown/accepted_effective/accepted_ignored/rejected/translated` 探测状态 round trip 不丢证据。
+- compatibility probe 按 model 过滤、按时间倒序查询；最小探测成功保持 `unknown`，4xx 与临时 5xx 分类不混淆。
 - 启动时 pending/waiting_retry/streaming 恢复为 interrupted。
 - waiting_retry/running attempt 启动恢复后不会自动再次发送。
 - 同一 snapshot 多个 attempt 的 context/body hash 一致。

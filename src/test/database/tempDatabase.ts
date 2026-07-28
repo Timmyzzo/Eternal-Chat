@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 import migrationSql from "@/infrastructure/db/migrations/0001_phase_3_authoritative_schema.sql?raw";
+import phase5aMigrationSql from "@/infrastructure/db/migrations/0002_phase_5a_request_attempts.sql?raw";
+import phase6MigrationSql from "@/infrastructure/db/migrations/0003_phase_6_provider_configuration.sql?raw";
 import type { SqlDatabase, SqlQueryResult } from "@/infrastructure/db/sqlDatabase";
 
 export interface MigrationDefinition {
@@ -20,6 +22,26 @@ export const PHASE_3_MIGRATION: MigrationDefinition = {
   checksum: readMigrationChecksum(migrationSql),
   sql: migrationSql,
 };
+
+export const PHASE_5A_MIGRATION: MigrationDefinition = {
+  version: 2,
+  name: "phase_5a_request_attempts",
+  checksum: readMigrationChecksum(phase5aMigrationSql),
+  sql: phase5aMigrationSql,
+};
+
+export const PHASE_6_MIGRATION: MigrationDefinition = {
+  version: 3,
+  name: "phase_6_provider_configuration",
+  checksum: readMigrationChecksum(phase6MigrationSql),
+  sql: phase6MigrationSql,
+};
+
+export const APPLICATION_MIGRATIONS = [
+  PHASE_3_MIGRATION,
+  PHASE_5A_MIGRATION,
+  PHASE_6_MIGRATION,
+] as const;
 
 export class NodeSqliteDatabase implements SqlDatabase {
   private readonly database: DatabaseSync;
@@ -62,7 +84,7 @@ export interface TempDatabaseFixture {
 }
 
 export async function createTempDatabase(
-  migrations: MigrationDefinition[] = [PHASE_3_MIGRATION],
+  migrations: readonly MigrationDefinition[] = APPLICATION_MIGRATIONS,
 ): Promise<TempDatabaseFixture> {
   const directory = await mkdtemp(join(tmpdir(), "eternal-chat-phase3-"));
   const databasePath = join(directory, "fixture.sqlite");
@@ -94,7 +116,7 @@ export async function createTempDatabase(
 
 export function applyMigrations(
   database: NodeSqliteDatabase,
-  migrations: MigrationDefinition[],
+  migrations: readonly MigrationDefinition[],
 ): void {
   const ordered = [...migrations].sort((left, right) => left.version - right.version);
   const migrationTableExists =
@@ -152,7 +174,7 @@ export async function pathExists(path: string): Promise<boolean> {
 function readMigrationChecksum(sql: string): string {
   const match = sql.match(/'(?<checksum>sha256:[0-9a-f]{64})'/);
   if (!match?.groups?.checksum) {
-    throw new Error("Phase 3 migration checksum is missing");
+    throw new Error("Migration checksum is missing");
   }
   return match.groups.checksum;
 }

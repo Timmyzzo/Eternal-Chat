@@ -12,7 +12,7 @@ import {
 
 describe("Phase 3 migrations", () => {
   it("initializes a new database with the authoritative schema", async () => {
-    const fixture = await createTempDatabase();
+    const fixture = await createTempDatabase([PHASE_3_MIGRATION]);
     try {
       const tables = await fixture.database.select<{ name: string }>(
         `SELECT name FROM sqlite_master
@@ -54,7 +54,7 @@ describe("Phase 3 migrations", () => {
   });
 
   it("does not reapply an already recorded migration", async () => {
-    const fixture = await createTempDatabase();
+    const fixture = await createTempDatabase([PHASE_3_MIGRATION]);
     try {
       const appliedAt = await fixture.database.select<{ applied_at: number }>(
         "SELECT applied_at FROM schema_migration WHERE version = 1",
@@ -84,7 +84,7 @@ describe("Phase 3 migrations", () => {
   });
 
   it("rolls back every statement when a migration fails", async () => {
-    const fixture = await createTempDatabase();
+    const fixture = await createTempDatabase([PHASE_3_MIGRATION]);
     try {
       expect(() =>
         applyMigrations(fixture.database, [

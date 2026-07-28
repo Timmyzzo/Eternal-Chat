@@ -4,8 +4,8 @@
 
 本文件定义 Eternal Chat 如何持续跟进主流官方文档，并把最新模型、协议、端点、参数、工具、流式事件和错误行为转成可编辑 preset。它不是永久能力白名单，也不允许用模型公司名称决定最终请求。
 
-- 最近核对日期：2026-07-27
-- 状态：`specified`
+- 最近核对日期：2026-07-28
+- 状态：`in_progress`；Phase 6 request catalog/preset/golden fixture 已验证，完整响应/流式目录与非 OpenAI 网络 parser 继续按后续阶段实现
 - 当前重点：OpenAI、ChatGPT 产品、Claude/Anthropic、Grok/xAI、Gemini/Google
 - 配置原则：官方建议优先用于预填，用户 wire 配置优先用于发送
 
@@ -239,6 +239,12 @@ translated
 ```
 
 只有响应、usage、结构化结果或官方资料能证明字段产生效果时，才标记 `accepted_effective`。HTTP 200 本身只证明请求被接受。
+
+### 9.4 Phase 6 实现边界
+
+- 内置 endpoint request catalog 已从字符串列表升级为 `OfficialFieldRecord`，记录 endpoint、API version、location、path、type、required、unsupported behavior、source URL、checkedAt 和 revision；没有专用控件的字段仍可通过高级 schema/raw override 设置。
+- OpenAI Chat/Responses、xAI Grok、Gemini generateContent/Interactions、Anthropic Messages 保持各自 endpoint、reasoning/thinking path 和工具 descriptor，不做跨协议字段翻译。Gemini/Anthropic 本轮只验证 schema 与 golden fixture，实际网络 parser 属于 Phase 9。
+- compatibility probe 只对已实现网络 codec 的 OpenAI Chat/Responses 开放。一次成功请求形成 `unknown` 证据；明确 4xx 可形成 `rejected`；临时 5xx/网络失败保持 `unknown`。`accepted_effective`、`accepted_ignored` 和 `translated` 必须继续依赖可审计的独立证据。
 
 ## 10. 官方来源明细
 

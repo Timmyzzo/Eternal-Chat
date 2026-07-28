@@ -215,6 +215,8 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 
 ## Phase 5: OpenAI 兼容双端点最小聊天纵切
 
+状态：`verified`（2026-07-28）
+
 ### 目标
 
 打通“配置 -> 输入 -> 流式 -> 持久化 -> 重启读取”的最小真实链路，并同时证明 Chat Completions 与 Responses 两种 OpenAI 兼容基本聊天端点可用。
@@ -236,6 +238,16 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 - 至少各有一个真实或明确兼容端点冒烟；若某中转站只支持其中一种，报告必须分开记录。
 - 重启后历史一致。
 - 流式期间历史消息不重渲染。
+
+### 退出证据
+
+- 内置 OpenAI-compatible Chat Completions 与 Responses protocol profile preset 已进入 SQLite；连接配置支持 base URL、显式端口、路径、Header、Query、模型 Body、会话内凭据和 Chat reasoning delta path 的用户 fork，显示名称与 `vendorHint` 不参与协议选择。
+- 两种协议共用冻结的 `PreparedDispatch`、`ContextManifest`、请求快照、text/reasoning/usage/done/error 领域事件和应用根级 `ActiveRequestRegistry`；同一会话只允许一个 active request，页面 detach 不取消请求，停止、错误、终态竞争和手动重新生成均收敛到单一持久化终态。
+- 本地随机显式端口 HTTP/SSE 兼容端点分别完成 Chat Completions 与 Responses 的确定性“配置 -> 发送 -> 流式 -> SQLite 终态 -> 重启读取”验证；两条链路分别断言最终 path、认证 Header、`messages`/`input` Body、模型、stream 标志、response id、usage 和快照脱敏。
+- Responses 另于 2026-07-28 使用 `grok-4.5` 对第三方 OpenAI-compatible `/v1/responses` 端点完成真实流式冒烟：HTTP 200，`Content-Type: text/event-stream`，收到 11 个网络分片和 37 个 SSE 事件；reasoning、text、usage 与 response id 均成功解析，terminal、SQLite、RequestSnapshot 和重启读取均为 `done`，`attemptCount=1`，凭据未进入快照。Chat Completions 的验收证据是上述独立本地兼容端点，不与本次真实 Responses 证据混写或互相替代。
+- 三栏工作区、响应式请求检查器、会话输入区、轻量安全 Markdown、结构化 reasoning、usage、错误和重新生成入口已接通；历史消息与流式消息使用独立状态和 memo 边界，组件测试证明 delta 更新不重渲染既有历史。
+- Phase 5 退出时 SQLite migration 保持版本 1；终态写入对 snapshot/message 只认领一次，启动恢复可修复 message 已完成而 snapshot 尚未落终态的中断窗口，尚未包含 Phase 5A 的 `request_attempt` 表、自动重试、waiting_retry 和倒计时。
+- Phase 5 退出基线的 `pnpm verify` 覆盖 91 个 Vitest、13 个 contract、10 个 Playwright 和 22 个 Rust 测试；初始 web assets 为 529.5 KiB raw、162.7 KiB gzip。`pnpm tauri build --debug --no-bundle` 成功生成 debug 应用，`git diff --check`、敏感信息扫描、禁止路径检查及 1280×800/900×700 浏览器视觉核对均通过。
 
 ## Phase 5A: 自动重试与请求尝试
 
@@ -265,7 +277,20 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 
 详细契约见 [自动重试与请求尝试](./features/16-automatic-retry.md)。
 
+### 退出证据
+
+- `RetryPolicy` 已实现应用默认与 endpoint 覆盖、408/429/500/502/503/504、network/timeout/stream 和 HTTP 200 内嵌结构化错误分类；合法/非法 `Retry-After`、指数退避、full jitter、attempt 上限与总时间预算均有确定性测试。
+- migration v2 仅新增 `request_attempt`、`application_retry_policy` 及原子 command view/trigger，未改写已发布的 v1；logical request 启动、retry schedule、下一 attempt、终态、等待中断和启动恢复均在 SQLite 中保持一致。
+- 自动 attempt 只替换 transport request id，固定 ContextManifest、参数、认证解析后的 wire 请求、context hash、body hash 和发送时生效的 policy；等待期间修改设置不会改变旧 logical request。
+- 本地真实 HTTP/SSE + SQLite fixture 连续两次返回 429 后成功，得到一个 assistant、一个 logical request、三个 attempts；三次请求除 transport id 外完全相同。手动重新生成仍创建新的 sibling 与 snapshot，已完成客户端工具在 continuation retry 中只执行一次。
+- response id、reasoning、text、tool、source、usage 等有价值输出均越过安全边界并禁止从头自动重试；参数、鉴权、模型和明确不可重试错误不会触发删字段、降级或重发。停止与 timer 竞态最多启动零次或一次下一 attempt。
+- waiting_retry、attempt 详情、HTTP/provider 原因、倒计时和停止操作已进入主聊天 UI 与请求检查器；1280×800 和 900×700 Playwright/截图检查确认无空白、横向溢出、遮挡或弹层裁切，设置与 inspector 内容可滚动。
+- `pnpm verify` 通过 131 个 Vitest、13 个 contract、12 个 Playwright 和 23 个 Rust 测试；初始 web assets 为 564.4 KiB raw、170.0 KiB gzip。`pnpm tauri build --debug --no-bundle`、Prettier、ESLint、TypeScript、clippy、license、`git diff --check`、migration checksum、敏感信息和临时产物检查均通过。
+- Phase 5 已记录的真实 Responses 冒烟继续作为独立补充证据；Phase 5A 的重试、协议错误和竞态结论来自可重复的本地 fixture，不把外部 HTTP 200 当作 retry policy 生效证明。
+
 ## Phase 6: 全量端点、能力、参数与工具目录
+
+状态：`verified`（2026-07-28）
 
 ### 目标
 
@@ -294,6 +319,18 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 - GPT/Grok/Gemini/Claude preset 的实际 path 和 endpoint 不混用，用户 fork 不被官方更新覆盖。
 - 工具 off/auto/required 与最终 descriptor 一致；不支持 required 时显式不可用。
 - HTTP 200 不自动判定参数有效，`accepted_ignored` 与 `accepted_effective` 有独立证据。
+
+### 退出证据
+
+- `ProviderConnection -> ProviderEndpoint -> ProtocolProfile -> Model -> ConversationOverride` 五层配置进入同一请求装配链；protocol、endpoint、model schema/raw 和 conversation schema/raw 按固定顺序合并，Body 递归合并、数组整体替换，Header 大小写不敏感，Body 点路径与 Header/Query/path override 均保留逐字段 winner/overridden 来源。
+- `RequestSnapshot`、请求预览和 transport 使用同一个冻结最终请求；未知参数、目录外模型、自定义枚举与 `xhigh` 不被删除或降级，Provider 422 不触发删字段重试，临时错误继续只由 Phase 5A RetryPolicy 处理。
+- 官方 registry 记录 `sourceUrl`、`checkedAt=2026-07-28` 和 revision，提供 OpenAI Chat/Responses、xAI Grok、Gemini generateContent/Interactions 与 Anthropic Messages 的协议隔离 preset 和 golden fixture。endpoint request field catalog 使用结构化 `OfficialFieldRecord`；capability、parameter 和 tool schema 均有校验、动态呈现和 raw JSON 入口。
+- tracked ProtocolProfile、Endpoint 和 Model 在 revision 更新时投影新默认并保留 `overridePatch`；detached fork 不自动变化，Copy/Reset 与全部 raw override 清理有 UI/E2E 证据。migration v3 持久化 source、preset binding、parameter/tool values 和 path override，checksum 为 `sha256:05286a7302da65f4c18531b756bbb24dab316d9135a53934d18ad76821296a51`，v1/v2 未改写。
+- compatibility evidence 支持 `unknown/accepted_effective/accepted_ignored/rejected/translated`、Current/Stale、SQLite 查询和用户触发的单参数最小探测。最小探测只对已经实现网络 codec 的 OpenAI Chat/Responses 开放；HTTP 200 保持 `unknown`，4xx 才可形成 `rejected`，5xx/网络故障不误判参数无效。
+- mixed relay fixture 在同一 Connection 下验证显式 `port 443` 的 Responses 与 `port 8443` 的 Anthropic Messages；显示名称不决定协议。unknown Responses model 完成浏览器 fixture 对话；Grok `reasoning.effort=xhigh`、`web_search`、`x_search` 及 tool off/auto/required 均由 wire fixture 覆盖。
+- `pnpm verify` 通过 35 个 Vitest 文件、157 个测试；`test:contracts` 独立复跑 5 个文件、17 个测试；16 个 Playwright 和 23 个 Rust 测试通过。初始 web assets 为 615.9 KiB raw、181.8 KiB gzip；`pnpm tauri build --debug --no-bundle` 成功生成 `src-tauri/target/debug/eternal-chat.exe`。
+- 1280×800 与 900×700 的仓库外截图经实际查看：document、sheet 均无横向 overflow，sheet 内容可滚动，Current/Stale、结构化字段目录、capability/parameter/tool、advanced schema、conversation override 与 mixed relay 双端口均可达。格式、ESLint、TypeScript、clippy、license、`git diff --check`、Markdown links/anchors、migration checksum、敏感信息和临时产物卫生门禁通过。
+- 本轮没有重复真实第三方 Responses 请求，主要依据确定性本地 fixture；Phase 5 已有的 `grok-4.5` 真实 Responses 证据继续单独保留，但请求装配链在 Phase 6 发生过变化，因此不能把旧 HTTP 200 单独当作本轮参数有效性证明。Anthropic/Gemini 实际网络 codec/parser 仍明确属于 Phase 9。
 
 ## Phase 7: 结构化思考、搜索和信源
 
@@ -587,4 +624,4 @@ Cherry 参考文档与差异说明
 
 ## 6. 当前下一步
 
-Phase 4 已完成并验证。下一次明确实现请求应只进入 Phase 5 的 OpenAI 兼容双端点最小聊天纵切；不要同时提前加入 Phase 5A 自动重试、MCP、知识库或其他后续模块。
+Phase 5、Phase 5A 与 Phase 6 已完成并验证。当前按要求停在 Phase 6，Phase 7 未开始；等待用户新指令，不自动进入结构化搜索/信源时间线、Anthropic/Gemini 完整网络 parser、MCP、知识库或其他后续模块。

@@ -3,7 +3,7 @@
 ## 状态
 
 - 里程碑：MVP
-- 当前状态：`specified`
+- 当前状态：`in_progress`；Phase 5 已验证两种 OpenAI-compatible 协议的基础 reasoning/usage 流式块，Phase 6 仅完成 Provider 内置搜索工具 descriptor 与 wire fixture。搜索过程、来源、计时和完整结构化事件属于 Phase 7，当前尚未开始
 - 参考方向：NBSearch 的结构化事件思路，从零实现
 
 ## 用户问题

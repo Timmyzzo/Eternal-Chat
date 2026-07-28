@@ -351,6 +351,7 @@ async function createConversation(
     extraBody: {},
     extraHeaders: {},
     extraQuery: {},
+    extraPath: {},
     toolsOverride: {},
     contextPolicy: { mode: "lossless" },
     activeLeafMessageId: null,

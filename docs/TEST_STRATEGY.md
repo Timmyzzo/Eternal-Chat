@@ -245,6 +245,8 @@ mock server 先返回两次 429，再返回成功流。断言 UI 显示 attempt�
 - 默认发送遇到参数错误时不自动删字段重试；自动 retry 的 wire request hash 保持不变。
 - tracked preset 升级只更新未覆盖字段并显示冲突 diff；detached fork 不随内置 revision 改变，重新跟踪必须经过预览。
 
+Phase 6 当前自动化覆盖 tracked profile/endpoint/model 的 revision 投影和 detached 不变性；完整冲突 diff、orphan preset 与重新跟踪预览仍作为 Provider 管理完整 MVP 的后续阻断项保留，不将纯 revision 投影测试冒充完整迁移 UI。
+
 ## 13. 真实 API 冒烟
 
 发布候选使用用户自有测试配置执行，不把 key 提交到仓库。至少验证：
@@ -325,3 +327,11 @@ MVP 发布前必须全部通过：
 - 当前文档基线、相对链接、标题锚点和官方来源检查。
 
 任何“仅人工看起来正常”的结果不能替代上述阻断测试。
+
+## 17. Phase 6 最终验证记录（2026-07-28）
+
+- `pnpm verify`：35 个 Vitest 文件、157 个测试通过；`pnpm test:contracts` 独立复跑 5 个文件、17 个测试；16 个 Playwright 和 23 个 Rust 测试通过。contract 复跑数不与主 Vitest 数相加为唯一总数。
+- 构建与静态门禁：Prettier、ESLint、TypeScript、Vite build、615.9 KiB raw / 181.8 KiB gzip 资产预算、Rust fmt/clippy/test、license check 全部通过；`pnpm tauri build --debug --no-bundle` 成功。
+- 数据与协议：migration v3 checksum、v1/v2 不变、SQLite probe list/filter/order、tracked endpoint/model update、unknown model、xhigh、unknown value、tool required、Provider 422 不降级和 HTTP 200/4xx/5xx evidence 分类均有确定性测试。
+- UI：1280×800 与 900×700 的 16 个 E2E 通过；仓库外截图经实际查看，无横向 overflow，sheet 可滚动，Current/Stale、字段目录、capability/parameter/tool、advanced override、conversation override、显式 port 443/8443 均可达。
+- 本轮没有重复真实第三方请求。Phase 5 的真实 Responses 冒烟继续作为历史补充证据；Phase 6 请求装配变化由本地 fixture 和最终 wire snapshot 覆盖，不能用旧 HTTP 200 代替本轮参数有效性证明。

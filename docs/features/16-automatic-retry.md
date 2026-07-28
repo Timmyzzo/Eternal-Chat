@@ -3,7 +3,7 @@
 ## 状态
 
 - 里程碑：MVP
-- 当前状态：`specified`
+- 当前状态：`verified`
 - 优先级：OpenAI 兼容基础聊天之后、动态参数与多 Provider 扩展之前
 - 核心依赖：统一错误模型、RequestSnapshot、Rust 通用网络管道、可取消计时器
 
@@ -54,7 +54,7 @@ logical request 的一次实际网络尝试。第 1 次为 initial attempt，后
 
 ## RetryPolicy
 
-计划中的规范配置：
+当前规范配置：
 
 ```ts
 type RetryPolicy = {
@@ -71,9 +71,9 @@ type RetryPolicy = {
 }
 ```
 
-MVP 计划默认值，需在 Phase 5A 用本地 fixture 和真实中转站冒烟后确认：
+Phase 5A 已通过确定性本地 fixture、SQLite 集成和 UI 验收确认以下默认值；外部端点只作为补充证据，不替代错误与重试契约：
 
-| 设置 | 计划默认值 | 说明 |
+| 设置 | 当前默认值 | 说明 |
 |---|---:|---|
 | 启用 | 是 | 只对满足安全条件的失败生效 |
 | `maxRetries` | 3 | 最多 4 次实际尝试 |
@@ -244,6 +244,16 @@ attempt 至少支持：
 - `Retry-After`、停止、倒计时和最终失败原因在 UI 中可见。
 - 已完成客户端工具在 continuation 重试中执行次数仍为一次。
 - 自动重试不改变分支，不隐藏费用风险，也不进行参数或上下文降级。
+
+## 验证证据
+
+- 连续两次 429 后成功的本地 HTTP/SSE + SQLite fixture 只产生一个 assistant、一个 logical request 和三个 attempts；除 transport request id 外，三次 wire 请求完全相同。
+- 408、429、500、502、503、504、network、timeout、HTTP 200 内嵌 allowlist、合法/非法 `Retry-After`、full jitter、attempt 上限和总预算均有确定性测试。
+- response id、reasoning、text、tool、source、usage 等有价值输出均会越过安全重试边界；参数、鉴权、模型和明确不可重试错误不会自动重发或删字段。
+- migration v2 新增 `request_attempt` 与应用默认 policy 持久化，保留 v1 checksum；logical request、schedule、attempt 启动/终结、等待中断和重启恢复使用原子 SQLite command。
+- waiting_retry、attempt 详情、倒计时和停止 UI 已在 1280×800 与 900×700 两个 Playwright 视口通过，停止/timer 竞争最多启动零次或一次下一 attempt。
+- Phase 6 收口后的完整 `pnpm verify` 通过 157 个 Vitest、17 个 contract 复跑、16 个 Playwright 和 23 个 Rust 测试；Tauri debug no-bundle 构建、双视口截图、格式、静态检查、migration checksum、敏感信息和临时产物检查通过，既有 retry 契约仍全部包含在门禁中。
+- Phase 5 的真实 Responses 冒烟与 Chat Completions 本地兼容端点证据继续分开记录；本功能不把外部 HTTP 200 当作参数或 retry policy 已生效的唯一证据。
 
 ## 依赖和后续扩展
 

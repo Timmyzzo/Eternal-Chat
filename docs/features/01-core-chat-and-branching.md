@@ -3,7 +3,7 @@
 ## 状态
 
 - 里程碑：MVP / V1
-- 当前状态：MVP 核心分支为 `specified`；V1 完整分支树 UI 为 `deferred`
+- 当前状态：MVP 为 `in_progress`，Phase 5 最小聊天、停止、错误、手动重新生成和重启读取已验证；编辑与完整分支交互等剩余范围继续按路线实现。V1 完整分支树 UI 为 `deferred`
 - 核心依赖：Provider、SQLite、ContextAssembler、流式管道
 
 ## 用户问题

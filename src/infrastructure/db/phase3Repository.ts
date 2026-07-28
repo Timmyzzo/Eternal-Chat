@@ -5,6 +5,7 @@ import type {
   MessageCursor,
   MessagePage,
   MessageStatus,
+  RequestAttempt,
   RequestSnapshot,
 } from "@/domain/chat";
 import { parseMessageBlocks, serializeMessageBlocks } from "@/domain/chat";
@@ -13,6 +14,7 @@ import type {
   Artifact,
   Model,
   ParameterCompatibilityProbe,
+  PresetBinding,
   ProtocolProfile,
   ProviderConnection,
   ProviderEndpoint,
@@ -50,8 +52,83 @@ export interface MessageParentChain {
   missingParentId: string | null;
 }
 
+export interface FinalizeChatRequestInput {
+  assistantMessageId: string;
+  blocks: MessageBlocks;
+  completedAt: number;
+  errorCode: string | null;
+  finishReason: string | null;
+  firstEventAt: number | null;
+  providerAnchor: JsonValue | null;
+  providerResponseId: string | null;
+  snapshotId: string;
+  status: "done" | "interrupted" | "error";
+  usage: JsonValue | null;
+}
+
+export interface ScheduleRetryInput {
+  assistantMessageId: string;
+  attemptId: string;
+  bytesReceived: number;
+  completedAt: number;
+  firstByteAt: number | null;
+  firstSemanticEventAt: number | null;
+  httpStatus: number | null;
+  providerErrorCode: string | null;
+  retryAfterMs: number | null;
+  retryReason: string;
+  scheduledDelayMs: number;
+  semanticEventCount: number;
+  snapshotId: string;
+}
+
+export interface FinalizeRequestAttemptInput extends FinalizeChatRequestInput {
+  attemptId: string;
+  attemptStatus: Extract<
+    RequestAttempt["status"],
+    "completed" | "non_retryable_failed" | "cancelled"
+  >;
+  bytesReceived: number;
+  firstByteAt: number | null;
+  firstSemanticEventAt: number | null;
+  httpStatus: number | null;
+  providerErrorCode: string | null;
+  retryReason: string | null;
+  semanticEventCount: number;
+}
+
+export interface InterruptWaitingRetryInput {
+  assistantMessageId: string;
+  blocks: MessageBlocks;
+  completedAt: number;
+  errorCode: string;
+  finishReason: string;
+  snapshotId: string;
+  status: "interrupted" | "error";
+}
+
 export class Phase3Repository {
   constructor(private readonly database: SqlDatabase) {}
+
+  async getApplicationRetryPolicy(): Promise<JsonValue | null> {
+    const row = await selectOptional<{ policy_json: string }>(
+      this.database,
+      "SELECT policy_json FROM application_retry_policy WHERE singleton = 1",
+      [],
+    );
+    return row ? decodeJson(row.policy_json) : null;
+  }
+
+  async setApplicationRetryPolicy(policy: JsonValue, updatedAt: number): Promise<void> {
+    await this.database.execute(
+      `INSERT INTO application_retry_policy (singleton, policy_json, updated_at)
+      VALUES (1, ?, ?)
+      ON CONFLICT(singleton) DO UPDATE SET
+        policy_json = excluded.policy_json,
+        updated_at = excluded.updated_at`,
+      [encodeJson(policy), updatedAt],
+    );
+  }
 
   async insertProviderConnection(value: ProviderConnection): Promise<void> {
     await this.database.execute(
@@ -79,13 +156,20 @@ export class Phase3Repository {
     return row ? mapProviderConnection(row) : null;
   }
 
+  async listProviderConnections(): Promise<ProviderConnection[]> {
+    const rows = await this.database.select<ProviderConnectionRow>(
+      "SELECT * FROM provider_connection ORDER BY enabled DESC, name, id",
+    );
+    return rows.map(mapProviderConnection);
+  }
+
   async insertProtocolProfile(value: ProtocolProfile): Promise<void> {
     await this.database.execute(
       `INSERT INTO protocol_profile (
         id, name, codec_id, request_mapping_json, response_mapping_json,
-        tools_mapping_json, continuation_mapping_json, source_json, user_edited,
-        revision, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        tools_mapping_json, continuation_mapping_json, source_json, preset_binding_json,
+        user_edited, revision, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       protocolProfileBindings(value),
     );
   }
@@ -95,7 +179,7 @@ export class Phase3Repository {
       `UPDATE protocol_profile SET
         name = ?, codec_id = ?, request_mapping_json = ?, response_mapping_json = ?,
         tools_mapping_json = ?, continuation_mapping_json = ?, source_json = ?,
-        user_edited = ?, revision = ?, updated_at = ?
+        preset_binding_json = ?, user_edited = ?, revision = ?, updated_at = ?
       WHERE id = ?`,
       [
         value.name,
@@ -105,6 +189,7 @@ export class Phase3Repository {
         encodeJson(value.toolsMapping),
         encodeNullableJson(value.continuationMapping),
         encodeNullableJson(value.source),
+        encodeNullableJson(value.presetBinding as unknown as JsonValue | null),
         toInteger(value.userEdited),
         value.revision,
         value.updatedAt,
@@ -123,14 +208,21 @@ export class Phase3Repository {
     return row ? mapProtocolProfile(row) : null;
   }
 
+  async listProtocolProfiles(): Promise<ProtocolProfile[]> {
+    const rows = await this.database.select<ProtocolProfileRow>(
+      "SELECT * FROM protocol_profile ORDER BY name, id",
+    );
+    return rows.map(mapProtocolProfile);
+  }
+
   async insertProviderEndpoint(value: ProviderEndpoint): Promise<void> {
     await this.database.execute(
       `INSERT INTO provider_endpoint (
         id, connection_id, name, base_url, explicit_port, path_template, method,
         api_version, protocol_profile_id, auth_bindings_json, headers_json,
-        query_json, body_defaults_json, timeout_ms, retry_policy_json, enabled,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        query_json, body_defaults_json, path_defaults_json, source_json,
+        preset_binding_json, timeout_ms, retry_policy_json, enabled, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         value.id,
         value.connectionId,
@@ -145,6 +237,9 @@ export class Phase3Repository {
         encodeJson(value.headers),
         encodeJson(value.query),
         encodeJson(value.bodyDefaults),
+        encodeJson(value.pathDefaults),
+        encodeNullableJson(value.source),
+        encodeNullableJson(value.presetBinding as unknown as JsonValue | null),
         value.timeoutMs,
         encodeNullableJson(value.retryPolicy),
         toInteger(value.enabled),
@@ -152,6 +247,41 @@ export class Phase3Repository {
         value.updatedAt,
       ],
     );
+  }
+
+  async updateProviderEndpoint(value: ProviderEndpoint): Promise<void> {
+    const result = await this.database.execute(
+      `UPDATE provider_endpoint SET
+        connection_id = ?, name = ?, base_url = ?, explicit_port = ?, path_template = ?,
+        method = ?, api_version = ?, protocol_profile_id = ?, auth_bindings_json = ?,
+        headers_json = ?, query_json = ?, body_defaults_json = ?, path_defaults_json = ?,
+        source_json = ?, preset_binding_json = ?, timeout_ms = ?, retry_policy_json = ?,
+        enabled = ?, updated_at = ?
+      WHERE id = ?`,
+      [
+        value.connectionId,
+        value.name,
+        value.baseUrl,
+        value.explicitPort,
+        value.pathTemplate,
+        value.method,
+        value.apiVersion,
+        value.protocolProfileId,
+        encodeJson(value.authBindings),
+        encodeJson(value.headers),
+        encodeJson(value.query),
+        encodeJson(value.bodyDefaults),
+        encodeJson(value.pathDefaults),
+        encodeNullableJson(value.source),
+        encodeNullableJson(value.presetBinding as unknown as JsonValue | null),
+        value.timeoutMs,
+        encodeNullableJson(value.retryPolicy),
+        toInteger(value.enabled),
+        value.updatedAt,
+        value.id,
+      ],
+    );
+    requireChanged(result.rowsAffected, "provider endpoint");
   }
 
   async getProviderEndpoint(id: string): Promise<ProviderEndpoint | null> {
@@ -163,15 +293,40 @@ export class Phase3Repository {
     return row ? mapProviderEndpoint(row) : null;
   }
 
+  async updateProviderEndpointRetryPolicy(
+    endpointId: string,
+    retryPolicy: JsonValue | null,
+    updatedAt: number,
+  ): Promise<void> {
+    const result = await this.database.execute(
+      `UPDATE provider_endpoint
+      SET retry_policy_json = ?, updated_at = ?
+      WHERE id = ?`,
+      [encodeNullableJson(retryPolicy), updatedAt, endpointId],
+    );
+    requireChanged(result.rowsAffected, "provider endpoint");
+  }
+
+  async listProviderEndpoints(connectionId?: string): Promise<ProviderEndpoint[]> {
+    const rows = await this.database.select<ProviderEndpointRow>(
+      connectionId
+        ? "SELECT * FROM provider_endpoint WHERE connection_id = ? ORDER BY enabled DESC, name, id"
+        : "SELECT * FROM provider_endpoint ORDER BY enabled DESC, name, id",
+      connectionId ? [connectionId] : [],
+    );
+    return rows.map(mapProviderEndpoint);
+  }
+
   async insertModel(value: Model): Promise<void> {
     await this.database.execute(
       `INSERT INTO model (
         id, endpoint_id, model_id, display_name, capability_schema_json,
-        params_schema_json, built_in_tools_json, extra_body_json, extra_headers_json,
-        extra_query_json, context_window, max_output_tokens,
+        params_schema_json, parameter_values_json, built_in_tools_json, tool_settings_json,
+        extra_body_json, extra_headers_json, extra_query_json, extra_path_json,
+        context_window, max_output_tokens,
         protocol_profile_override_id, schema_origin, schema_revision, enabled,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        source_json, preset_binding_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         value.id,
         value.endpointId,
@@ -179,20 +334,63 @@ export class Phase3Repository {
         value.displayName,
         encodeJson(value.capabilitySchema),
         encodeJson(value.paramsSchema),
+        encodeJson(value.parameterValues),
         encodeJson(value.builtInTools),
+        encodeJson(value.toolSettings),
         encodeJson(value.extraBody),
         encodeJson(value.extraHeaders),
         encodeJson(value.extraQuery),
+        encodeJson(value.extraPath),
         value.contextWindow,
         value.maxOutputTokens,
         value.protocolProfileOverrideId,
         value.schemaOrigin,
         value.schemaRevision,
         toInteger(value.enabled),
+        encodeNullableJson(value.source),
+        encodeNullableJson(value.presetBinding as unknown as JsonValue | null),
         value.createdAt,
         value.updatedAt,
       ],
     );
+  }
+
+  async updateModel(value: Model): Promise<void> {
+    const result = await this.database.execute(
+      `UPDATE model SET
+        endpoint_id = ?, model_id = ?, display_name = ?, capability_schema_json = ?,
+        params_schema_json = ?, parameter_values_json = ?, built_in_tools_json = ?,
+        tool_settings_json = ?, extra_body_json = ?, extra_headers_json = ?,
+        extra_query_json = ?, extra_path_json = ?, context_window = ?, max_output_tokens = ?,
+        protocol_profile_override_id = ?, schema_origin = ?, schema_revision = ?, enabled = ?,
+        source_json = ?, preset_binding_json = ?, updated_at = ?
+      WHERE id = ?`,
+      [
+        value.endpointId,
+        value.modelId,
+        value.displayName,
+        encodeJson(value.capabilitySchema),
+        encodeJson(value.paramsSchema),
+        encodeJson(value.parameterValues),
+        encodeJson(value.builtInTools),
+        encodeJson(value.toolSettings),
+        encodeJson(value.extraBody),
+        encodeJson(value.extraHeaders),
+        encodeJson(value.extraQuery),
+        encodeJson(value.extraPath),
+        value.contextWindow,
+        value.maxOutputTokens,
+        value.protocolProfileOverrideId,
+        value.schemaOrigin,
+        value.schemaRevision,
+        toInteger(value.enabled),
+        encodeNullableJson(value.source),
+        encodeNullableJson(value.presetBinding as unknown as JsonValue | null),
+        value.updatedAt,
+        value.id,
+      ],
+    );
+    requireChanged(result.rowsAffected, "model");
   }
 
   async getModel(id: string): Promise<Model | null> {
@@ -200,6 +398,16 @@ export class Phase3Repository {
       id,
     ]);
     return row ? mapModel(row) : null;
+  }
+
+  async listModels(endpointId?: string): Promise<Model[]> {
+    const rows = await this.database.select<ModelRow>(
+      endpointId
+        ? "SELECT * FROM model WHERE endpoint_id = ? ORDER BY enabled DESC, display_name, id"
+        : "SELECT * FROM model ORDER BY enabled DESC, display_name, id",
+      endpointId ? [endpointId] : [],
+    );
+    return rows.map(mapModel);
   }
 
   async insertCompatibilityProbe(value: ParameterCompatibilityProbe): Promise<void> {
@@ -241,6 +449,16 @@ export class Phase3Repository {
     return row ? mapCompatibilityProbe(row) : null;
   }
 
+  async listCompatibilityProbes(modelRef?: string): Promise<ParameterCompatibilityProbe[]> {
+    const rows = await this.database.select<CompatibilityProbeRow>(
+      `SELECT * FROM parameter_compatibility_probe
+       ${modelRef === undefined ? "" : "WHERE model_ref = ?"}
+       ORDER BY checked_at DESC, id`,
+      modelRef === undefined ? [] : [modelRef],
+    );
+    return rows.map(mapCompatibilityProbe);
+  }
+
   async insertArtifact(value: Artifact): Promise<void> {
     await this.database.execute(
       `INSERT INTO artifact (
@@ -278,10 +496,10 @@ export class Phase3Repository {
     await this.database.execute(
       `INSERT INTO conversation (
         id, title, model_ref, system_prompt, params_json, extra_body_json,
-        extra_headers_json, extra_query_json, tools_override_json,
+        extra_headers_json, extra_query_json, extra_path_json, tools_override_json,
         context_policy_json, active_leaf_message_id, archived, starred,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
       [
         value.id,
         value.title,
@@ -291,6 +509,7 @@ export class Phase3Repository {
         encodeJson(value.extraBody),
         encodeJson(value.extraHeaders),
         encodeJson(value.extraQuery),
+        encodeJson(value.extraPath),
         encodeJson(value.toolsOverride),
         encodeJson(value.contextPolicy),
         toInteger(value.archived),
@@ -310,6 +529,33 @@ export class Phase3Repository {
       [id],
     );
     return row ? mapConversation(row) : null;
+  }
+
+  async updateConversationConfiguration(value: Conversation): Promise<void> {
+    const result = await this.database.execute(
+      `UPDATE conversation SET
+        params_json = ?, extra_body_json = ?, extra_headers_json = ?, extra_query_json = ?,
+        extra_path_json = ?, tools_override_json = ?, updated_at = ?
+      WHERE id = ?`,
+      [
+        encodeJson(value.params),
+        encodeJson(value.extraBody),
+        encodeJson(value.extraHeaders),
+        encodeJson(value.extraQuery),
+        encodeJson(value.extraPath),
+        encodeJson(value.toolsOverride),
+        value.updatedAt,
+        value.id,
+      ],
+    );
+    requireChanged(result.rowsAffected, "conversation configuration");
+  }
+
+  async listConversations(): Promise<Conversation[]> {
+    const rows = await this.database.select<ConversationRow>(
+      "SELECT * FROM conversation WHERE archived = 0 ORDER BY updated_at DESC, id DESC",
+    );
+    return rows.map(mapConversation);
   }
 
   async getMessage(id: string): Promise<Message | null> {
@@ -528,6 +774,164 @@ export class Phase3Repository {
     );
   }
 
+  async startLogicalRequest(snapshot: RequestSnapshot, attempt: RequestAttempt): Promise<void> {
+    await this.database.execute(
+      `INSERT INTO start_logical_request_command (
+        snapshot_id, conversation_id, user_message_id, assistant_message_id,
+        connection_id, endpoint_id, model_ref, protocol_profile_id,
+        protocol_profile_revision, codec_version, request_method, request_url,
+        request_headers_json, request_query_json, request_body_json, params_json,
+        context_manifest_json, context_hash, request_body_hash, retry_policy_json,
+        started_at, attempt_id, transport_request_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        snapshot.id,
+        snapshot.conversationId,
+        snapshot.userMessageId,
+        snapshot.assistantMessageId,
+        snapshot.connectionId,
+        snapshot.endpointId,
+        snapshot.modelRef,
+        snapshot.protocolProfileId,
+        snapshot.protocolProfileRevision,
+        snapshot.codecVersion,
+        snapshot.requestMethod,
+        snapshot.requestUrl,
+        encodeNullableJson(snapshot.requestHeaders),
+        encodeNullableJson(snapshot.requestQuery),
+        encodeNullableJson(snapshot.requestBody),
+        encodeJson(snapshot.params),
+        encodeJson(snapshot.contextManifest),
+        snapshot.contextHash,
+        snapshot.requestBodyHash,
+        encodeJson(snapshot.retryPolicy),
+        attempt.startedAt,
+        attempt.id,
+        attempt.transportRequestId,
+      ],
+    );
+  }
+
+  async getRequestAttempt(id: string): Promise<RequestAttempt | null> {
+    const row = await selectOptional<RequestAttemptRow>(
+      this.database,
+      "SELECT * FROM request_attempt WHERE id = ?",
+      [id],
+    );
+    return row ? mapRequestAttempt(row) : null;
+  }
+
+  async listRequestAttempts(snapshotId: string): Promise<RequestAttempt[]> {
+    const rows = await this.database.select<RequestAttemptRow>(
+      "SELECT * FROM request_attempt WHERE request_snapshot_id = ? ORDER BY attempt_no",
+      [snapshotId],
+    );
+    return rows.map(mapRequestAttempt);
+  }
+
+  async scheduleRetry(input: ScheduleRetryInput): Promise<void> {
+    await this.database.execute(
+      `INSERT INTO schedule_retry_command (
+        snapshot_id, assistant_message_id, attempt_id, retry_reason, http_status,
+        provider_error_code, retry_after_ms, scheduled_delay_ms, completed_at,
+        first_byte_at, first_semantic_event_at, bytes_received, semantic_event_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.snapshotId,
+        input.assistantMessageId,
+        input.attemptId,
+        input.retryReason,
+        input.httpStatus,
+        input.providerErrorCode,
+        input.retryAfterMs,
+        input.scheduledDelayMs,
+        input.completedAt,
+        input.firstByteAt,
+        input.firstSemanticEventAt,
+        input.bytesReceived,
+        input.semanticEventCount,
+      ],
+    );
+  }
+
+  async startRetryAttempt(assistantMessageId: string, attempt: RequestAttempt): Promise<void> {
+    await this.database.execute(
+      `INSERT INTO start_retry_attempt_command (
+        snapshot_id, assistant_message_id, attempt_id, attempt_no,
+        transport_request_id, request_body_hash, started_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        attempt.requestSnapshotId,
+        assistantMessageId,
+        attempt.id,
+        attempt.attemptNo,
+        attempt.transportRequestId,
+        attempt.requestBodyHash,
+        attempt.startedAt,
+      ],
+    );
+  }
+
+  async finalizeRequestAttempt(input: FinalizeRequestAttemptInput): Promise<boolean> {
+    try {
+      await this.database.execute(
+        `INSERT INTO finalize_request_attempt_command (
+          snapshot_id, assistant_message_id, attempt_id, attempt_status,
+          message_status, blocks_json, usage_json, provider_response_id,
+          provider_anchor_json, finish_reason, error_code, retry_reason,
+          http_status, provider_error_code, completed_at, first_event_at,
+          first_byte_at, first_semantic_event_at, bytes_received, semantic_event_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.snapshotId,
+          input.assistantMessageId,
+          input.attemptId,
+          input.attemptStatus,
+          input.status,
+          serializeMessageBlocks(input.blocks),
+          encodeNullableJson(input.usage),
+          input.providerResponseId,
+          encodeNullableJson(input.providerAnchor),
+          input.finishReason,
+          input.errorCode,
+          input.retryReason,
+          input.httpStatus,
+          input.providerErrorCode,
+          input.completedAt,
+          input.firstEventAt,
+          input.firstByteAt,
+          input.firstSemanticEventAt,
+          input.bytesReceived,
+          input.semanticEventCount,
+        ],
+      );
+      return true;
+    } catch (error) {
+      if (hasSqliteCode(error, "finalize_request_attempt_not_running")) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async interruptWaitingRetry(input: InterruptWaitingRetryInput): Promise<void> {
+    await this.database.execute(
+      `INSERT INTO interrupt_waiting_retry_command (
+        snapshot_id, assistant_message_id, blocks_json, completed_at,
+        error_code, finish_reason, message_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.snapshotId,
+        input.assistantMessageId,
+        serializeMessageBlocks(input.blocks),
+        input.completedAt,
+        input.errorCode,
+        input.finishReason,
+        input.status,
+      ],
+    );
+  }
+
   async getRequestSnapshot(id: string): Promise<RequestSnapshot | null> {
     const row = await selectOptional<RequestSnapshotRow>(
       this.database,
@@ -537,10 +941,129 @@ export class Phase3Repository {
     return row ? mapRequestSnapshot(row) : null;
   }
 
+  async getRequestSnapshotByAssistant(assistantMessageId: string): Promise<RequestSnapshot | null> {
+    const row = await selectOptional<RequestSnapshotRow>(
+      this.database,
+      "SELECT * FROM request_snapshot WHERE assistant_message_id = ? ORDER BY started_at DESC LIMIT 1",
+      [assistantMessageId],
+    );
+    return row ? mapRequestSnapshot(row) : null;
+  }
+
+  async markRequestRunning(
+    snapshotId: string,
+    assistantMessageId: string,
+    startedAt: number,
+  ): Promise<void> {
+    const snapshot = await this.database.execute(
+      `UPDATE request_snapshot
+      SET status = 'running', started_at = ?
+      WHERE id = ? AND assistant_message_id = ? AND status = 'pending' AND attempt_count = 0`,
+      [startedAt, snapshotId, assistantMessageId],
+    );
+    requireChanged(snapshot.rowsAffected, "request snapshot");
+
+    const message = await this.database.execute(
+      `UPDATE message
+      SET status = 'streaming', updated_at = ?
+      WHERE id = ? AND status = 'pending' AND role = 'assistant'`,
+      [startedAt, assistantMessageId],
+    );
+    requireChanged(message.rowsAffected, "assistant message");
+  }
+
+  async finalizeChatRequest(input: FinalizeChatRequestInput): Promise<boolean> {
+    const claim = await this.database.execute(
+      `UPDATE request_snapshot
+      SET
+        attempt_count = 1,
+        finish_reason = ?,
+        error_code = ?,
+        provider_anchor_json = ?,
+        first_event_at = ?,
+        completed_at = ?
+      WHERE id = ?
+        AND assistant_message_id = ?
+        AND attempt_count = 0
+        AND status IN ('pending', 'running')`,
+      [
+        input.finishReason,
+        input.errorCode,
+        encodeNullableJson(input.providerAnchor),
+        input.firstEventAt,
+        input.completedAt,
+        input.snapshotId,
+        input.assistantMessageId,
+      ],
+    );
+    if (claim.rowsAffected === 0) {
+      return false;
+    }
+
+    const message = await this.database.execute(
+      `UPDATE message
+      SET
+        status = ?,
+        blocks_json = ?,
+        usage_json = ?,
+        provider_response_id = ?,
+        updated_at = ?
+      WHERE id = ?
+        AND role = 'assistant'
+        AND status IN ('pending', 'waiting_retry', 'streaming')`,
+      [
+        input.status,
+        serializeMessageBlocks(input.blocks),
+        encodeNullableJson(input.usage),
+        input.providerResponseId,
+        input.completedAt,
+        input.assistantMessageId,
+      ],
+    );
+    if (message.rowsAffected !== 1) {
+      await this.failClaimedSnapshot(input.snapshotId, input.completedAt);
+      throw new Error("storage_finalize_failed: assistant message was not active");
+    }
+
+    const snapshot = await this.database.execute(
+      `UPDATE request_snapshot
+      SET status = ?
+      WHERE id = ? AND attempt_count = 1 AND status IN ('pending', 'running')`,
+      [input.status, input.snapshotId],
+    );
+    if (snapshot.rowsAffected !== 1) {
+      throw new Error("storage_finalize_failed: request snapshot was not active");
+    }
+    return true;
+  }
+
   async recoverInterrupted(recoveredAt: number): Promise<void> {
     await this.database.execute(
       "INSERT INTO recover_interrupted_command (recovered_at) VALUES (?)",
       [recoveredAt],
+    );
+
+    await this.database.execute(
+      `UPDATE request_snapshot
+      SET status = (
+        SELECT message.status
+        FROM message
+        WHERE message.id = request_snapshot.assistant_message_id
+      )
+      WHERE status IN ('pending', 'running')
+        AND attempt_count = 1
+        AND assistant_message_id IN (
+          SELECT id FROM message WHERE status IN ('done', 'interrupted', 'error')
+        )`,
+    );
+  }
+
+  private async failClaimedSnapshot(snapshotId: string, completedAt: number): Promise<void> {
+    await this.database.execute(
+      `UPDATE request_snapshot
+      SET status = 'error', error_code = 'storage_finalize_failed', completed_at = ?
+      WHERE id = ? AND attempt_count = 1 AND status IN ('pending', 'running')`,
+      [completedAt, snapshotId],
     );
   }
 }
@@ -568,6 +1091,7 @@ interface ProtocolProfileRow {
   tools_mapping_json: string;
   continuation_mapping_json: string | null;
   source_json: string | null;
+  preset_binding_json: string | null;
   user_edited: number;
   revision: number;
   created_at: number;
@@ -588,6 +1112,9 @@ interface ProviderEndpointRow {
   headers_json: string;
   query_json: string;
   body_defaults_json: string;
+  path_defaults_json: string;
+  source_json: string | null;
+  preset_binding_json: string | null;
   timeout_ms: number | null;
   retry_policy_json: string | null;
   enabled: number;
@@ -602,16 +1129,21 @@ interface ModelRow {
   display_name: string;
   capability_schema_json: string;
   params_schema_json: string;
+  parameter_values_json: string;
   built_in_tools_json: string;
+  tool_settings_json: string;
   extra_body_json: string;
   extra_headers_json: string;
   extra_query_json: string;
+  extra_path_json: string;
   context_window: number | null;
   max_output_tokens: number | null;
   protocol_profile_override_id: string | null;
   schema_origin: string;
   schema_revision: number;
   enabled: number;
+  source_json: string | null;
+  preset_binding_json: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -657,6 +1189,7 @@ interface ConversationRow {
   extra_body_json: string;
   extra_headers_json: string;
   extra_query_json: string;
+  extra_path_json: string;
   tools_override_json: string;
   context_policy_json: string;
   active_leaf_message_id: string | null;
@@ -720,6 +1253,28 @@ interface RequestSnapshotRow {
   completed_at: number | null;
 }
 
+interface RequestAttemptRow {
+  id: string;
+  request_snapshot_id: string;
+  attempt_no: number;
+  trigger: RequestAttempt["trigger"];
+  transport_request_id: string;
+  request_body_hash: string;
+  status: RequestAttempt["status"];
+  retryable: number;
+  retry_reason: string | null;
+  http_status: number | null;
+  provider_error_code: string | null;
+  retry_after_ms: number | null;
+  scheduled_delay_ms: number | null;
+  started_at: number;
+  first_byte_at: number | null;
+  first_semantic_event_at: number | null;
+  completed_at: number | null;
+  bytes_received: number;
+  semantic_event_count: number;
+}
+
 function mapProviderConnection(row: ProviderConnectionRow): ProviderConnection {
   return {
     id: row.id,
@@ -742,6 +1297,7 @@ function protocolProfileBindings(value: ProtocolProfile): unknown[] {
     encodeJson(value.toolsMapping),
     encodeNullableJson(value.continuationMapping),
     encodeNullableJson(value.source),
+    encodeNullableJson(value.presetBinding as unknown as JsonValue | null),
     toInteger(value.userEdited),
     value.revision,
     value.createdAt,
@@ -759,6 +1315,7 @@ function mapProtocolProfile(row: ProtocolProfileRow): ProtocolProfile {
     toolsMapping: decodeJson(row.tools_mapping_json),
     continuationMapping: decodeNullableJson(row.continuation_mapping_json),
     source: decodeNullableJson(row.source_json),
+    presetBinding: decodePresetBinding(row.preset_binding_json),
     userEdited: fromInteger(row.user_edited),
     revision: row.revision,
     createdAt: row.created_at,
@@ -781,6 +1338,9 @@ function mapProviderEndpoint(row: ProviderEndpointRow): ProviderEndpoint {
     headers: decodeJson(row.headers_json),
     query: decodeJson(row.query_json),
     bodyDefaults: decodeJson(row.body_defaults_json),
+    pathDefaults: decodeJson(row.path_defaults_json),
+    source: decodeNullableJson(row.source_json),
+    presetBinding: decodePresetBinding(row.preset_binding_json),
     timeoutMs: row.timeout_ms,
     retryPolicy: decodeNullableJson(row.retry_policy_json),
     enabled: fromInteger(row.enabled),
@@ -797,15 +1357,20 @@ function mapModel(row: ModelRow): Model {
     displayName: row.display_name,
     capabilitySchema: decodeJson(row.capability_schema_json),
     paramsSchema: decodeJson(row.params_schema_json),
+    parameterValues: decodeJson(row.parameter_values_json),
     builtInTools: decodeJson(row.built_in_tools_json),
+    toolSettings: decodeJson(row.tool_settings_json),
     extraBody: decodeJson(row.extra_body_json),
     extraHeaders: decodeJson(row.extra_headers_json),
     extraQuery: decodeJson(row.extra_query_json),
+    extraPath: decodeJson(row.extra_path_json),
     contextWindow: row.context_window,
     maxOutputTokens: row.max_output_tokens,
     protocolProfileOverrideId: row.protocol_profile_override_id,
     schemaOrigin: row.schema_origin,
     schemaRevision: row.schema_revision,
+    source: decodeNullableJson(row.source_json),
+    presetBinding: decodePresetBinding(row.preset_binding_json),
     enabled: fromInteger(row.enabled),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -858,6 +1423,7 @@ function mapConversation(row: ConversationRow): Conversation {
     extraBody: decodeJson(row.extra_body_json),
     extraHeaders: decodeJson(row.extra_headers_json),
     extraQuery: decodeJson(row.extra_query_json),
+    extraPath: decodeJson(row.extra_path_json),
     toolsOverride: decodeJson(row.tools_override_json),
     contextPolicy: decodeJson(row.context_policy_json),
     activeLeafMessageId: row.active_leaf_message_id,
@@ -920,6 +1486,30 @@ function mapRequestSnapshot(row: RequestSnapshotRow): RequestSnapshot {
   };
 }
 
+function mapRequestAttempt(row: RequestAttemptRow): RequestAttempt {
+  return {
+    id: row.id,
+    requestSnapshotId: row.request_snapshot_id,
+    attemptNo: row.attempt_no,
+    trigger: row.trigger,
+    transportRequestId: row.transport_request_id,
+    requestBodyHash: row.request_body_hash,
+    status: row.status,
+    retryable: fromInteger(row.retryable),
+    retryReason: row.retry_reason,
+    httpStatus: row.http_status,
+    providerErrorCode: row.provider_error_code,
+    retryAfterMs: row.retry_after_ms,
+    scheduledDelayMs: row.scheduled_delay_ms,
+    startedAt: row.started_at,
+    firstByteAt: row.first_byte_at,
+    firstSemanticEventAt: row.first_semantic_event_at,
+    completedAt: row.completed_at,
+    bytesReceived: row.bytes_received,
+    semanticEventCount: row.semantic_event_count,
+  };
+}
+
 async function selectOptional<T extends object>(
   database: SqlDatabase,
   query: string,
@@ -958,10 +1548,18 @@ function decodeNullableJson(value: string | null): JsonValue | null {
   return value === null ? null : decodeJson(value);
 }
 
+function decodePresetBinding(value: string | null): PresetBinding | null {
+  return decodeNullableJson(value) as unknown as PresetBinding | null;
+}
+
 function toInteger(value: boolean): number {
   return value ? 1 : 0;
 }
 
 function fromInteger(value: number): boolean {
   return value === 1;
+}
+
+function hasSqliteCode(error: unknown, code: string): boolean {
+  return error instanceof Error && error.message.includes(code);
 }

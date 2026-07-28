@@ -34,6 +34,7 @@ describe("Pipe IPC contract", () => {
           kind: "http",
           message: "The server returned HTTP 502.",
           status: 502,
+          retryAfter: "2",
           body: "fixture error",
         },
       },

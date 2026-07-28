@@ -20,6 +20,7 @@ export interface PipeError {
   body?: string;
   kind: PipeErrorKind;
   message: string;
+  retryAfter?: string;
   status?: number;
 }
 

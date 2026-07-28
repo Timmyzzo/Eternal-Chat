@@ -430,6 +430,8 @@ type SourceMetadata = {
 - preset 被删除时保留用户 override 和最后可用 base snapshot，标记 orphaned；不得因目录更新让已有 endpoint/model 无法打开。
 - `sourceUrl`、`checkedAt`、base revision、当前 revision 和用户 override 来源在 UI/导出中可追踪。
 
+Phase 6 已实现 ProtocolProfile、Endpoint 和 Model 的 tracked revision 投影：未覆盖字段采用当前 registry 默认，`overridePatch` 继续获胜，detached fork 不参与自动更新。完整的删除/改名冲突 diff、orphan preset 迁移和 detached 重新跟踪预览仍是 Provider 管理完整 MVP 的后续生命周期要求，不属于本轮已经宣称完成的 Phase 6 退出证据。
+
 ### 11.2 模型支持分层
 
 内置目录和发布测试不追求覆盖所有历史型号，具体范围遵循 [基线与决策治理](./BASELINE_AND_DECISIONS.md#331-模型支持范围)：
@@ -539,3 +541,11 @@ Claude legacy thinking 和 Gemini 2.5 thinking budget 默认只保留为协议�
 ## 16. 验收标准
 
 Provider/模型管理标记为 `verified` 前，必须完成一个混合中转场景：同一连接配置至少两个不同端口和两种协议；添加目录外模型；自定义能力、参数 key/path、工具 descriptor 和响应映射；通过请求预览和 mock server 证明最终 wire 内容；模拟一个参数报错、一个参数被忽略和一个未知行为，并保证客户端不做厂商硬识别或静默降级。
+
+### Phase 6 验证记录（2026-07-28）
+
+- 同一 Connection 下的 `port 443` Responses 与 `port 8443` Anthropic Messages 已通过 repository、E2E 和截图验证；端口、path、profile 与 model id 均在摘要中显式可见。
+- 官方 request field catalog 已结构化记录 location/path/type/source/checkedAt/revision；capability、parameter、tool 有运行时校验、动态呈现和高级 JSON 入口。
+- tracked endpoint/model/profile revision 更新保留 override；detached fork、Copy、Reset 和 raw override 清理已验证。RequestSnapshot 保存三层 preset binding 与字段来源。
+- 用户可对当前 OpenAI Chat/Responses 模型发起单参数最小探测；请求清空模型默认参数和工具设置，仅加入所选参数，同时保留连接所需 endpoint/raw/auth 配置。成功只记为 `unknown`，4xx 记为 `rejected`，5xx/网络失败不误判。
+- Anthropic/Gemini 的 schema、wire mapping 和 golden fixture 已完成；实际网络 codec/parser 仍按路线留在 Phase 9。Provider 与模型管理功能整体仍保持 `in_progress`，因为完整网络适配、冲突迁移预览及其他 MVP 范围尚未完成。

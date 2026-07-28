@@ -39,6 +39,38 @@ describe("Phase3Repository round trips", () => {
     expect(primary.endpoint.explicitPort).toBe(8443);
     expect(secondary.endpoint.explicitPort).toBe(443);
     expect(primary.endpoint.protocolProfileId).not.toBe(secondary.endpoint.protocolProfileId);
+
+    const updatedEndpoint = {
+      ...primary.endpoint,
+      baseUrl: "https://updated.fixture.invalid",
+      pathTemplate: "/updated/{deployment}",
+      pathDefaults: { deployment: "responses" },
+      presetBinding: {
+        mode: "tracked" as const,
+        presetId: "fixture-endpoint-preset",
+        baseRevision: 2,
+        overridePatch: { endpoint: { pathTemplate: "/updated/{deployment}" } },
+      },
+      updatedAt: FIXTURE_TIME + 20,
+    };
+    await repository.updateProviderEndpoint(updatedEndpoint);
+    expect(await repository.getProviderEndpoint(updatedEndpoint.id)).toEqual(updatedEndpoint);
+
+    const updatedModel = {
+      ...primary.model,
+      displayName: "Updated fixture model",
+      parameterValues: { reasoning_effort: "xhigh" },
+      presetBinding: {
+        mode: "tracked" as const,
+        presetId: "fixture-model-preset",
+        baseRevision: 2,
+        overridePatch: { parameterValues: { reasoning_effort: "xhigh" } },
+      },
+      schemaRevision: 2,
+      updatedAt: FIXTURE_TIME + 21,
+    };
+    await repository.updateModel(updatedModel);
+    expect(await repository.getModel(updatedModel.id)).toEqual(updatedModel);
   });
 
   it("round trips every compatibility probe status without sharing endpoint evidence", async () => {
@@ -74,6 +106,11 @@ describe("Phase3Repository round trips", () => {
       await repository.insertCompatibilityProbe(probe);
       expect(await repository.getCompatibilityProbe(probe.id)).toEqual(probe);
     }
+
+    expect(
+      (await repository.listCompatibilityProbes(graph.model.id)).map((probe) => probe.id),
+    ).toEqual([...statuses].reverse().map((status) => `probe-${status}`));
+    expect(await repository.listCompatibilityProbes("missing-model")).toEqual([]);
   });
 
   it("round trips versioned message blocks and artifact references without losing unknown blocks", async () => {
@@ -266,6 +303,7 @@ async function createConversation(
     extraBody: {},
     extraHeaders: {},
     extraQuery: {},
+    extraPath: { deployment: "fixture" },
     toolsOverride: {},
     contextPolicy: { mode: "lossless" },
     activeLeafMessageId: null,

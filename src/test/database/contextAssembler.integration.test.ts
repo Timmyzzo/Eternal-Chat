@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { createApplicationRuntime } from "@/application/chat/runtime";
 import { ContextAssembler, preflightLosslessBudget } from "@/application/context/contextAssembler";
 import type { Conversation, MessageBlocks } from "@/domain/chat";
 import {
@@ -9,7 +10,8 @@ import {
   rootMessageId,
   type PendingTurn,
 } from "@/infrastructure/db/phase3Repository";
-import { FIXTURE_TIME } from "@/test/database/phase3Seed";
+import { FakeDesktopBridge } from "@/infrastructure/desktop/fakeDesktopBridge";
+import { FIXTURE_TIME, seedProviderGraph } from "@/test/database/phase3Seed";
 import { createTempDatabase, type TempDatabaseFixture } from "@/test/database/tempDatabase";
 
 describe("ContextAssembler SQLite integration", () => {
@@ -93,8 +95,18 @@ describe("ContextAssembler SQLite integration", () => {
     expect(selectedIds).not.toContain(deep.assistantMessage.id);
   });
 
-  it("reads all 500 database messages even when the simulated UI window contains only 50", async () => {
-    const conversation = await createConversation(repository, "conversation-500");
+  it("reads all 500 database messages while the application UI window contains only 50", async () => {
+    const graph = await seedProviderGraph(repository, "history-budget");
+    await fixture.database.execute(
+      "UPDATE model SET context_window = 5000, max_output_tokens = 100 WHERE id = ?",
+      [graph.model.id],
+    );
+    const conversation = await createConversation(
+      repository,
+      "conversation-500",
+      FIXTURE_TIME,
+      graph.model.id,
+    );
     const expectedIds: string[] = [];
     let parentId = rootMessageId(conversation.id);
 
@@ -120,9 +132,14 @@ describe("ContextAssembler SQLite integration", () => {
       throw error;
     }
 
-    const uiWindow = await repository.listActiveBranchPage(conversation.id, null, 50);
-    expect(uiWindow.messages).toHaveLength(50);
-    expect(uiWindow.messages.map((message) => message.id)).not.toContain(expectedIds[0]);
+    const runtime = await createApplicationRuntime(repository, new FakeDesktopBridge());
+    const uiWindow = await runtime.service.loadConversationMessages(conversation.id);
+    expect(uiWindow).toHaveLength(50);
+    expect(uiWindow.map((message) => message.id)).toEqual(expectedIds.slice(-50));
+    expect(uiWindow.map((message) => message.id)).not.toContain(expectedIds[0]);
+    expect((await runtime.service.preflightMessage(conversation.id, "next message")).status).toBe(
+      "over_limit",
+    );
     const databaseBefore = await messageStorageFingerprint(fixture, conversation.id);
     const context = await assembler.assemble({
       anchorMessageId: parentId,
@@ -285,16 +302,18 @@ async function createConversation(
   repository: Phase3Repository,
   id: string,
   createdAt = FIXTURE_TIME,
+  modelRef: string | null = null,
 ): Promise<Conversation> {
   return repository.createConversation({
     id,
     title: "Context integration fixture",
-    modelRef: null,
+    modelRef,
     systemPrompt: "",
     params: {},
     extraBody: {},
     extraHeaders: {},
     extraQuery: {},
+    extraPath: {},
     toolsOverride: {},
     contextPolicy: { mode: "lossless" },
     activeLeafMessageId: null,

@@ -135,6 +135,7 @@ export interface Conversation {
   extraBody: JsonValue;
   extraHeaders: JsonValue;
   extraQuery: JsonValue;
+  extraPath: JsonValue;
   toolsOverride: JsonValue;
   contextPolicy: JsonValue;
   activeLeafMessageId: string | null;
@@ -192,6 +193,33 @@ export interface RequestSnapshot {
   startedAt: number;
   firstEventAt: number | null;
   completedAt: number | null;
+}
+
+export type RequestAttemptTrigger = "initial" | "automatic_retry";
+
+export type RequestAttemptStatus =
+  "running" | "retryable_failed" | "non_retryable_failed" | "completed" | "cancelled";
+
+export interface RequestAttempt {
+  id: string;
+  requestSnapshotId: string;
+  attemptNo: number;
+  trigger: RequestAttemptTrigger;
+  transportRequestId: string;
+  requestBodyHash: string;
+  status: RequestAttemptStatus;
+  retryable: boolean;
+  retryReason: string | null;
+  httpStatus: number | null;
+  providerErrorCode: string | null;
+  retryAfterMs: number | null;
+  scheduledDelayMs: number | null;
+  startedAt: number;
+  firstByteAt: number | null;
+  firstSemanticEventAt: number | null;
+  completedAt: number | null;
+  bytesReceived: number;
+  semanticEventCount: number;
 }
 
 export interface MessageCursor {

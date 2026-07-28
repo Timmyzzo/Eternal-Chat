@@ -1,7 +1,7 @@
 use std::{collections::HashMap, future::pending, sync::Mutex, time::Duration};
 
 use reqwest::{
-    header::{HeaderName, HeaderValue},
+    header::{HeaderName, HeaderValue, RETRY_AFTER},
     redirect::Policy,
     Client, Method, Url,
 };
@@ -58,6 +58,8 @@ pub struct PipeError {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
 }
@@ -186,6 +188,11 @@ impl Pipeline {
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
+            let retry_after = response
+                .headers()
+                .get(RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
             let mut body = Vec::new();
 
             while body.len() < HTTP_ERROR_BODY_MAX_BYTES {
@@ -208,7 +215,11 @@ impl Pipeline {
                 }
             }
 
-            return Err(PipeError::http(status, limited_error_body(&body, request)));
+            return Err(PipeError::http(
+                status,
+                retry_after,
+                limited_error_body(&body, request),
+            ));
         }
 
         let mut decoder = SseDecoder::default();
@@ -365,6 +376,7 @@ impl PipeError {
             kind,
             message: message.to_owned(),
             status: None,
+            retry_after: None,
             body: None,
         }
     }
@@ -387,11 +399,12 @@ impl PipeError {
         Self::new(PipeErrorKind::Network, "The HTTP request failed.")
     }
 
-    fn http(status: u16, body: Option<String>) -> Self {
+    fn http(status: u16, retry_after: Option<String>, body: Option<String>) -> Self {
         Self {
             kind: PipeErrorKind::Http,
             message: format!("The server returned HTTP {status}."),
             status: Some(status),
+            retry_after,
             body,
         }
     }
@@ -1346,6 +1359,37 @@ mod tests {
             .cancel("request-race")
             .expect("late cancel is a no-op");
         assert_eq!(terminal_count(&events), 1);
+    }
+
+    #[tokio::test]
+    async fn non_success_exposes_only_the_standard_retry_after_header() {
+        let body = b"temporarily unavailable";
+        let mut response = format!(
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nRetry-After: 3\r\nX-Provider-Secret: must-not-cross-ipc\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(body);
+        let (base_url, _, server) = spawn_fixture(vec![FixtureStep::Write(response)]).await;
+        let pipeline = Pipeline::default();
+        let events = event_log();
+
+        pipeline
+            .start(
+                basic_request("request-retry-after", &base_url, Some(5_000)),
+                record_events(&events),
+            )
+            .await
+            .expect("HTTP error delivered");
+        server.await.expect("fixture server");
+
+        let error = only_error(&events);
+        assert_eq!(error.kind, PipeErrorKind::Http);
+        assert_eq!(error.status, Some(429));
+        assert_eq!(error.retry_after.as_deref(), Some("3"));
+        let serialized = serde_json::to_string(&error).expect("serializable pipe error");
+        assert!(!serialized.contains("X-Provider-Secret"));
+        assert!(!serialized.contains("must-not-cross-ipc"));
     }
 
     #[tokio::test]

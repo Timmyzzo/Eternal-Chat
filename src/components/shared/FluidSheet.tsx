@@ -12,9 +12,12 @@ import { useState, type PointerEvent as ReactPointerEvent, type ReactNode } from
 import { shouldDismissRightSheet } from "@/components/shared/fluidSheetMotion";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 interface FluidSheetProps {
   children: ReactNode;
+  closeLabel?: string;
+  contentClassName?: string;
   description: string;
   title: string;
   trigger: ReactNode;
@@ -23,6 +26,8 @@ interface FluidSheetProps {
 
 export function FluidSheet({
   children,
+  closeLabel = "Close sheet",
+  contentClassName,
   description,
   title,
   trigger,
@@ -68,7 +73,10 @@ export function FluidSheet({
             <DialogPrimitive.Content asChild forceMount>
               <motion.aside
                 animate={{ opacity: 1, x: 0 }}
-                className="fixed inset-y-0 right-0 z-50 flex w-[min(90vw,22.5rem)] flex-col border-l border-border bg-surface/96 shadow-sheet backdrop-blur-xl focus:outline-none"
+                className={cn(
+                  "fixed inset-y-0 right-0 z-50 flex w-[min(90vw,22.5rem)] flex-col border-l border-border bg-surface/96 shadow-sheet backdrop-blur-xl focus:outline-none",
+                  contentClassName,
+                )}
                 data-motion-reduced={prefersReducedMotion ? "true" : "false"}
                 data-slot="sheet-content"
                 data-ui="settings.view"
@@ -108,7 +116,7 @@ export function FluidSheet({
 
                   <DialogPrimitive.Close asChild>
                     <Button
-                      aria-label="Close appearance settings"
+                      aria-label={closeLabel}
                       className="absolute right-3 top-3"
                       size="icon"
                       variant="ghost"

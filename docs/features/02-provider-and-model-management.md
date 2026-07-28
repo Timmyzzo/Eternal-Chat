@@ -3,7 +3,7 @@
 ## 状态
 
 - 里程碑：MVP
-- 当前状态：`specified`
+- 当前状态：`in_progress`；Phase 5 已验证 OpenAI-compatible Chat/Responses 基础连接，Phase 6 已验证五层配置、动态 capability/parameter/tool schema、结构化 endpoint 字段目录、官方 preset、tracked/detached、mixed relay、unknown model 和兼容性探测。Anthropic/Gemini 完整网络 codec/parser、preset 冲突迁移预览及其他完整 MVP 范围仍未完成
 - 核心依赖：连接/端点数据模型、协议 profile、参数/能力/工具 schema、RequestSnapshot、RetryPolicy
 
 ## 用户问题
@@ -132,3 +132,14 @@
 - 用户能在 tracked 与 detached 模式间通过预览明确转换，不发生静默重置或重新附着。
 - 至少验证一个报错参数、一个静默忽略参数和一个未知参数，客户端行为与记录一致。
 - 未进入主动支持或特殊支持范围的模型不会增加发布阻断，但其通用透传、错误展示和手工探测仍可使用。
+
+## Phase 6 验证证据
+
+- 同一 Connection 下配置 `port 443` OpenAI Responses 与 `port 8443` Anthropic Messages，显示名称不参与 codec 选择；目录外 Responses model 可通过浏览器 fixture 完成聊天。
+- GPT/Grok/Gemini/Claude preset 记录来源、核对日期和 revision；Grok `xhigh`、4/16 agents 说明、`web_search`、`x_search` 与 Responses-only wire path 有 golden fixture。
+- capability、parameter、tool 和 endpoint field catalog 均可动态查看；没有专用控件的字段可通过 advanced schema/raw Body/Header/Query/path 设置。最终 preview、RequestSnapshot 和 transport 共享同一 resolved request。
+- tracked ProtocolProfile/Endpoint/Model 接收未覆盖的 registry 更新并保留 override，detached fork 不自动变化；Copy/Reset 与 raw override 清理通过 E2E。
+- compatibility evidence 支持五种状态、Current/Stale、SQLite 查询和用户触发的 OpenAI Chat/Responses 单参数最小探测；HTTP 200 保持 unknown，4xx rejected，5xx/网络错误不误判。
+- Provider 参数错误不会触发自动删字段、降级或隐形重发；临时错误继续只由 Phase 5A RetryPolicy 处理。
+
+Phase 7 未开始；结构化 reasoning/search/source UI 不属于本轮完成项。Anthropic/Gemini 实际网络 parser 仍属于 Phase 9。

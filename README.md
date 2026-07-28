@@ -4,7 +4,7 @@
 
 Eternal Chat 是一个以“模型能力不被客户端偷偷削弱”为首要原则的现代 AI 对话桌面客户端。它同时强调高自由度：中转站、端口、协议、端点、模型能力、参数名、参数路径、工具描述和界面体验都可以由用户配置。项目使用 Tauri 2 作为桌面壳，React + TypeScript 负责界面和业务逻辑，Rust 仅承担通用流式网络管道。
 
-当前仓库已完成 **Phase 1 工程脚手架与质量门禁**、**Phase 2 Rust 通用流式管道**、**Phase 3 SQLite、消息块与可恢复状态**和 **Phase 4 ContextAssembler 与工具连续性**：除 Tauri 2 + React 19 + TypeScript + Vite 工作区和通用 HTTP/SSE 管道外，现已建立 migration v1、10 张项目权威表、MessageBlock v1、权威 SQLite 当前分支读取、Provider 无关规范上下文、ContextManifest、OpenAI Chat/Responses 最小 serializer、最终请求 capture canary 和 lossless 预算预检。真实 Provider/API 调用、聊天纵切、流式 parser/reducer 和自动重试仍未开始，安全与隐私专题继续为 `deferred`。
+当前仓库已完成并验证 **Phase 1 工程脚手架与质量门禁**、**Phase 2 Rust 通用流式管道**、**Phase 3 SQLite、消息块与可恢复状态**、**Phase 4 ContextAssembler 与工具连续性**、**Phase 5 OpenAI 兼容双端点最小聊天纵切**、**Phase 5A 自动重试与请求尝试**和 **Phase 6 全量端点、能力、参数与工具目录**。当前已有 migration v1 基础、migration v2 retry 增量和 migration v3 Provider 配置所有权增量，建立了五层配置模型、来源化官方 preset、tracked/detached 生命周期、结构化 endpoint 字段目录、动态 capability/parameter/tool 表单、Body/Header/Query/path 覆盖、逐字段来源追踪、兼容性证据与用户触发的最小参数探测。Responses 已通过 `grok-4.5` 对第三方 OpenAI-compatible `/v1/responses` 端点的真实流式冒烟；Chat Completions 使用独立本地兼容 HTTP/SSE 端点完成确定性验证，两类证据不混写。本轮 Phase 6 主要依赖确定性 fixture，没有重复使用第三方凭据；Phase 7 尚未开始，完整 MVP 功能仍按各自规格保持 `in_progress`，安全与隐私专题继续为 `deferred`。
 
 ## 项目要解决的问题
 
@@ -39,7 +39,7 @@ Cherry Studio 的[用户文档](https://docs.cherryai.com.cn/)和 [GitHub 开发
 
 ## 当前实现优先级
 
-在用户明确要求开始编码后，核心开发顺序为：
+在用户明确要求开始编码后，核心开发顺序如下；前两项已完成并验证，当前下一项是第 3 项：
 
 1. 按官方协议打通 OpenAI 兼容 Chat Completions 与 Responses 的基本聊天、流式、持久化和工具历史回放。
 2. 完成适合 NewAPI 等中转站的[自动重试与请求尝试](./docs/features/16-automatic-retry.md)，优先处理 429、临时 5xx 和网络抖动。
@@ -142,9 +142,9 @@ Eternal Chat 的本地 `main` 仓库已经初始化并关联 [Timmyzzo/Eternal-C
 | 通用网络管道 | Phase 2 已验证：请求透传、增量 SSE、30ms/64 事件/256 KiB 合批、取消/超时/错误、Channel 与资源清理 |
 | 数据权威层 | Phase 3 已验证：migration v1、10 张项目表、MessageBlock、分支/恢复/分页与 RequestSnapshot revision 关联 |
 | 上下文与工具连续性 | Phase 4 已验证：SQLite parent 链、虚拟根排除、sibling 隔离、ContextManifest、双 OpenAI serializer、最终 wire canary、500/50 隔离与预算预检 |
-| 业务代码 | 真实聊天、Provider 网络调用、流式 parser/reducer 和自动重试未开始 |
-| 自动化测试 | 63 个 Vitest、13 个 contract、4 个 Playwright、22 个 Rust 测试，以及 SQLite 临时库清理、clippy、bundle 和 Tauri debug build 门禁 |
-| Git 仓库 | 本地 `main` 已关联 `origin/main`，Phase 1 基线已经提交并推送 |
+| 业务代码 | Phase 5、Phase 5A 与 Phase 6 已验证：OpenAI-compatible Chat/Responses 基础聊天与流式解析、有界自动重试、冻结请求、五层 Provider 配置、官方 preset、动态 schema/raw override、兼容性证据和 mixed relay；Anthropic/Gemini 实际网络 codec/parser 仍属于 Phase 9 |
+| 自动化测试 | 157 个 Vitest、17 个 contract 复跑、16 个 Playwright、23 个 Rust 测试；初始 web assets 为 615.9 KiB raw、181.8 KiB gzip；本地协议/重试/SQLite fixture、clippy、license、Tauri debug no-bundle 和双视口视觉门禁通过；Phase 5 真实 Responses 冒烟作为独立补充证据记录 |
+| Git 仓库 | 本地 `main` 已关联 `origin/main` |
 | 开源许可证 | 待项目所有者在发布前决定 |
 
-Phase 1 的工具链、依赖与 Motion 决定见 [ADR 0001](./docs/decisions/0001-phase-1-toolchain-and-motion.md)。Phase 4 已完成且没有进入真实网络；下一次明确实现请求应按 [开发路线](./docs/DEVELOPMENT_ROADMAP.md#phase-5-openai-兼容双端点最小聊天纵切) 只进入 Phase 5，Phase 5A 自动重试和后续模块仍未开始。
+Phase 1 的工具链、依赖与 Motion 决定见 [ADR 0001](./docs/decisions/0001-phase-1-toolchain-and-motion.md)。Phase 5 的真实 Responses 冒烟与本地 Chat fixture 继续分开记录；Phase 5A 和 Phase 6 的错误、重试、参数、preset、mixed relay 与兼容性结论来自可重复的本地测试。本次按要求停在 Phase 6，Phase 7 未开始，等待新的明确指令。
