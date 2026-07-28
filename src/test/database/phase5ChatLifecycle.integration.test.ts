@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createApplicationRuntime, type ApplicationRuntime } from "@/application/chat/runtime";
+import { ContextAssembler } from "@/application/context/contextAssembler";
 import type { Conversation } from "@/domain/chat";
 import { Phase3Repository } from "@/infrastructure/db/phase3Repository";
 import { initializePersistence } from "@/infrastructure/db/startup";
@@ -160,6 +161,125 @@ describe("Phase 5 SQLite chat lifecycle", () => {
       status: "done",
       providerResponseId: "response-background",
     });
+  });
+
+  it("edits a user message into a new branch without overwriting its descendants", async () => {
+    const { conversation, runtime } = await createConfiguredRuntime(repository, bridge, "edit");
+    const first = await runtime.service.sendMessage(conversation.id, "Original user text");
+    await waitForStarted(bridge, first.dispatch.transportRequest.requestId);
+    finishChatRequest(
+      bridge,
+      first.dispatch.transportRequest.requestId,
+      "response-edit-1",
+      "first",
+    );
+    await runtime.registry.whenTerminal(first.dispatch.transportRequest.requestId);
+
+    const descendant = await runtime.service.sendMessage(conversation.id, "Original descendant");
+    await waitForStarted(bridge, descendant.dispatch.transportRequest.requestId);
+    finishChatRequest(
+      bridge,
+      descendant.dispatch.transportRequest.requestId,
+      "response-edit-2",
+      "descendant answer",
+    );
+    await runtime.registry.whenTerminal(descendant.dispatch.transportRequest.requestId);
+
+    const edited = await runtime.service.editUserMessage(
+      first.dispatch.userMessage.id,
+      "Edited user text",
+    );
+    await waitForStarted(bridge, edited.dispatch.transportRequest.requestId);
+    expect(edited.dispatch.userMessage).toMatchObject({
+      parentId: first.dispatch.userMessage.parentId,
+      siblingOrder: 1,
+    });
+    expect(edited.dispatch.userMessage.id).not.toBe(first.dispatch.userMessage.id);
+    const editedContext = JSON.stringify(edited.dispatch.canonicalContext);
+    expect(editedContext).toContain("Edited user text");
+    expect(editedContext).not.toContain("Original user text");
+    expect(editedContext).not.toContain("Original descendant");
+
+    finishChatRequest(
+      bridge,
+      edited.dispatch.transportRequest.requestId,
+      "response-edit-3",
+      "edited answer",
+    );
+    await runtime.registry.whenTerminal(edited.dispatch.transportRequest.requestId);
+
+    expect(
+      (await runtime.service.loadConversationMessages(conversation.id)).map((value) => value.id),
+    ).toEqual([edited.dispatch.userMessage.id, edited.dispatch.assistantPlaceholder.id]);
+    expect(await repository.getMessage(first.dispatch.userMessage.id)).toMatchObject({
+      blocks: { blocks: [{ type: "text", text: "Original user text" }] },
+    });
+    expect(await repository.getMessage(descendant.dispatch.assistantPlaceholder.id)).toMatchObject({
+      blocks: { blocks: [{ type: "text", text: "descendant answer" }] },
+    });
+
+    expect(await runtime.service.switchMessageSibling(edited.dispatch.userMessage.id, -1)).toBe(
+      first.dispatch.userMessage.id,
+    );
+    expect(
+      (await runtime.service.loadConversationMessages(conversation.id)).map((value) => value.id),
+    ).toEqual([
+      first.dispatch.userMessage.id,
+      first.dispatch.assistantPlaceholder.id,
+      descendant.dispatch.userMessage.id,
+      descendant.dispatch.assistantPlaceholder.id,
+    ]);
+  });
+
+  it("switches assistant siblings and keeps ContextAssembler on the selected path", async () => {
+    const { conversation, runtime } = await createConfiguredRuntime(repository, bridge, "switch");
+    const first = await runtime.service.sendMessage(conversation.id, "Choose one answer");
+    await waitForStarted(bridge, first.dispatch.transportRequest.requestId);
+    finishChatRequest(
+      bridge,
+      first.dispatch.transportRequest.requestId,
+      "response-switch-original",
+      "original branch answer",
+    );
+    await runtime.registry.whenTerminal(first.dispatch.transportRequest.requestId);
+
+    const regenerated = await runtime.service.regenerate(first.dispatch.assistantPlaceholder.id);
+    await waitForStarted(bridge, regenerated.dispatch.transportRequest.requestId);
+    finishChatRequest(
+      bridge,
+      regenerated.dispatch.transportRequest.requestId,
+      "response-switch-regenerated",
+      "regenerated branch answer",
+    );
+    await runtime.registry.whenTerminal(regenerated.dispatch.transportRequest.requestId);
+
+    expect(
+      await runtime.service.switchMessageSibling(regenerated.dispatch.assistantPlaceholder.id, -1),
+    ).toBe(first.dispatch.assistantPlaceholder.id);
+    expect(
+      (await runtime.service.loadConversationMessages(conversation.id)).map((value) => value.id),
+    ).toEqual([first.dispatch.userMessage.id, first.dispatch.assistantPlaceholder.id]);
+    const assembler = new ContextAssembler(repository);
+    const originalContext = JSON.stringify(
+      await assembler.assemble({
+        anchorMessageId: first.dispatch.assistantPlaceholder.id,
+        conversationId: conversation.id,
+      }),
+    );
+    expect(originalContext).toContain("original branch answer");
+    expect(originalContext).not.toContain("regenerated branch answer");
+
+    expect(
+      await runtime.service.switchMessageSibling(first.dispatch.assistantPlaceholder.id, 1),
+    ).toBe(regenerated.dispatch.assistantPlaceholder.id);
+    const regeneratedContext = JSON.stringify(
+      await assembler.assemble({
+        anchorMessageId: regenerated.dispatch.assistantPlaceholder.id,
+        conversationId: conversation.id,
+      }),
+    );
+    expect(regeneratedContext).toContain("regenerated branch answer");
+    expect(regeneratedContext).not.toContain("original branch answer");
   });
 
   it("allows only one active request per conversation and accepts the next turn after terminal", async () => {

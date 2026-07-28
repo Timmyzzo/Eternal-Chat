@@ -108,6 +108,7 @@
 | [SECURITY_AND_PRIVACY.md](./SECURITY_AND_PRIVACY.md) | 后续安全与隐私专题范围 | `deferred` |
 | [TEST_STRATEGY.md](./TEST_STRATEGY.md) | 哪些行为必须由自动化测试锁死 | 门禁 |
 | [DEVELOPMENT_ROADMAP.md](./DEVELOPMENT_ROADMAP.md) | 应按什么顺序开发，何时算完成 | 执行计划 |
+| [archive/README.md](./archive/README.md) | 已完成阶段的历史执行记录与旧路线图快照 | 归档 |
 | [REFERENCE_PROJECT_AUDIT.md](./REFERENCE_PROJECT_AUDIT.md) | 参考项目哪些可借鉴，哪些不可照搬 | 参考性 |
 | [CHERRY_STUDIO_REFERENCE_GUIDE.md](./CHERRY_STUDIO_REFERENCE_GUIDE.md) | Cherry 用户/开发者双文档的长期参考规则与任务映射 | 基线 |
 | [features/README.md](./features/README.md) | 独立功能规格和实现状态 | 规范性 |
@@ -163,4 +164,4 @@
 
 ## 当前结论
 
-当前文档基线已经按“现代交互、高度客制化、协议与厂商解耦、官方资料持续更新”完成重整。Phase 1 工程骨架、Phase 2 通用 Rust 流式管道、Phase 3 SQLite 数据权威层、Phase 4 ContextAssembler 与工具连续性、Phase 5 OpenAI 兼容双端点最小聊天纵切、Phase 5A 自动重试与请求尝试、Phase 6 全量端点/能力/参数/工具目录，以及 Phase 7 结构化思考、搜索和信源均已验证。当前按要求停在 Phase 7；Phase 8 核心聊天交互与长对话性能尚未开始，也未进入 Anthropic/Gemini 完整网络 parser、MCP、知识库或其他后续阶段。
+Phase 1-8 均已验证。Phase 8 的完整 Vitest/E2E、双视口输入延迟、快速滚动、React 重渲染隔离和 100 次切换资源曲线已满足退出条件；2 小时 soak 保留为发布候选门禁。当前路线图只保留状态、退出证据和下一步，Phase 0-7 的详细历史退出记录已归档；Phase 9 及后续阶段未开始。

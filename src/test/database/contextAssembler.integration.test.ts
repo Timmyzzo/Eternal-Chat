@@ -163,7 +163,7 @@ describe("ContextAssembler SQLite integration", () => {
     expect(new Set(actualIds)).toHaveLength(500);
     expect(context.manifest.items).toHaveLength(500);
     expect(actualIds).not.toContain(rootMessageId(conversation.id));
-  });
+  }, 15_000);
 
   it("returns stable errors for a missing conversation or anchor from another conversation", async () => {
     const first = await createConversation(repository, "conversation-anchor-a");

@@ -19,9 +19,11 @@ import {
 } from "@/application/providers/compatibilityEvidence";
 import type {
   Conversation,
+  ConversationSearchResult,
   Message,
   MessageBlocks,
   MessagePage,
+  MessageSiblingInfo,
   RequestAttempt,
   RequestSnapshot,
 } from "@/domain/chat";
@@ -66,6 +68,7 @@ export interface ChatRepository {
   getApplicationRetryPolicy(): Promise<JsonValue | null>;
   interruptWaitingRetry(input: InterruptWaitingRetryInput): Promise<void>;
   getConversation(id: string): Promise<Conversation | null>;
+  findLatestLeafDescendant(messageId: string): Promise<string | null>;
   getMessage(id: string): Promise<Message | null>;
   getModel(id: string): Promise<Model | null>;
   getProtocolProfile(id: string): Promise<ProtocolProfile | null>;
@@ -81,18 +84,26 @@ export interface ChatRepository {
   updateModel(value: Model): Promise<void>;
   updateProviderEndpoint(value: ProviderEndpoint): Promise<void>;
   updateConversationConfiguration(value: Conversation): Promise<void>;
+  updateConversationMetadata(value: Conversation): Promise<void>;
   listActiveBranchPage(
     conversationId: string,
     cursor?: { createdAt: number; id: string } | null,
     limit?: number,
   ): Promise<MessagePage>;
-  listConversations(): Promise<Conversation[]>;
+  listConversations(archived?: boolean): Promise<Conversation[]>;
+  listMessageSiblingInfo(messageIds: string[]): Promise<MessageSiblingInfo[]>;
   listModels(endpointId?: string): Promise<Model[]>;
   listCompatibilityProbes(modelRef?: string): Promise<ParameterCompatibilityProbe[]>;
   listProtocolProfiles(): Promise<ProtocolProfile[]>;
   listProviderConnections(): Promise<ProviderConnection[]>;
   listProviderEndpoints(connectionId?: string): Promise<ProviderEndpoint[]>;
   listRequestAttempts(snapshotId: string): Promise<RequestAttempt[]>;
+  searchConversations(
+    query: string,
+    archived?: boolean,
+    limit?: number,
+  ): Promise<ConversationSearchResult[]>;
+  setActiveLeaf(conversationId: string, messageId: string, updatedAt: number): Promise<void>;
   markRequestRunning(
     snapshotId: string,
     assistantMessageId: string,
@@ -172,6 +183,12 @@ export type ConversationConfigurationInput = Pick<
 export interface SendMessageResult {
   budget: LosslessBudgetPreflightResult;
   dispatch: PreparedDispatch;
+}
+
+export interface ConversationMessageWindow {
+  messages: Message[];
+  nextCursor: MessagePage["nextCursor"];
+  siblings: MessageSiblingInfo[];
 }
 
 export class BudgetConfirmationRequiredError extends Error {
@@ -390,24 +407,89 @@ export class ChatService {
     return { current: true, probe };
   }
 
-  listConversations(): Promise<Conversation[]> {
-    return this.repository.listConversations();
+  listConversations(archived = false): Promise<Conversation[]> {
+    return this.repository.listConversations(archived);
   }
 
   listProtocolProfiles(): Promise<ProtocolProfile[]> {
     return this.repository.listProtocolProfiles();
   }
 
-  async loadConversationMessages(conversationId: string): Promise<Message[]> {
+  searchConversations(
+    query: string,
+    archived = false,
+    limit = 40,
+  ): Promise<ConversationSearchResult[]> {
+    const normalized = query.trim().slice(0, 160);
+    return normalized === ""
+      ? Promise.resolve([])
+      : this.repository.searchConversations(normalized, archived, limit);
+  }
+
+  async loadConversationWindow(
+    conversationId: string,
+    cursor: MessagePage["nextCursor"] = null,
+    limit = 50,
+  ): Promise<ConversationMessageWindow> {
     const conversation = await this.requireConversation(conversationId);
     if (!conversation.activeLeafMessageId) {
-      return [];
+      return { messages: [], nextCursor: null, siblings: [] };
     }
-    const chain = await this.repository.readMessageParentChain(conversation.activeLeafMessageId);
-    return chain.messages
-      .filter((message) => message.role !== "root")
-      .slice(0, 50)
-      .reverse();
+    const page = await this.repository.listActiveBranchPage(conversationId, cursor, limit);
+    const messages = orderBranchPage(page.messages);
+    return {
+      messages,
+      nextCursor: page.nextCursor,
+      siblings: await this.repository.listMessageSiblingInfo(messages.map((message) => message.id)),
+    };
+  }
+
+  async loadConversationMessages(conversationId: string): Promise<Message[]> {
+    return (await this.loadConversationWindow(conversationId)).messages;
+  }
+
+  async setConversationArchived(conversationId: string, archived: boolean): Promise<Conversation> {
+    const conversation = await this.requireConversation(conversationId);
+    const updated = { ...conversation, archived, updatedAt: this.now() };
+    await this.repository.updateConversationMetadata(updated);
+    return updated;
+  }
+
+  async activateSearchResult(result: ConversationSearchResult): Promise<void> {
+    if (!result.messageId) {
+      await this.requireConversation(result.conversationId);
+      return;
+    }
+    const message = await this.repository.getMessage(result.messageId);
+    if (!message || message.conversationId !== result.conversationId || message.role === "root") {
+      throw new Error("The search result is no longer available");
+    }
+    if (this.registry.hasActiveForConversation(result.conversationId)) {
+      throw new Error("Stop the active request before changing branches");
+    }
+    await this.repository.setActiveLeaf(result.conversationId, message.id, this.now());
+  }
+
+  async switchMessageSibling(messageId: string, direction: -1 | 1): Promise<string> {
+    const message = await this.repository.getMessage(messageId);
+    if (!message || message.role === "root") {
+      throw new Error("The message branch is no longer available");
+    }
+    if (this.registry.hasActiveForConversation(message.conversationId)) {
+      throw new Error("Stop the active request before changing branches");
+    }
+    const info = (await this.repository.listMessageSiblingInfo([message.id]))[0];
+    if (!info || info.siblingIds.length < 2) {
+      return message.id;
+    }
+    const targetIndex = Math.min(info.siblingIds.length - 1, Math.max(0, info.index + direction));
+    const targetId = info.siblingIds[targetIndex];
+    if (!targetId) {
+      return message.id;
+    }
+    const targetLeafId = (await this.repository.findLatestLeafDescendant(targetId)) ?? targetId;
+    await this.repository.setActiveLeaf(message.conversationId, targetLeafId, this.now());
+    return targetId;
   }
 
   getSnapshotForAssistant(assistantMessageId: string): Promise<RequestSnapshot | null> {
@@ -619,6 +701,50 @@ export class ChatService {
     });
   }
 
+  async editUserMessage(
+    userMessageId: string,
+    text: string,
+    allowOverLimit = false,
+  ): Promise<SendMessageResult> {
+    const previousUser = await this.repository.getMessage(userMessageId);
+    const draft = text.trim();
+    if (!previousUser || previousUser.role !== "user" || !previousUser.parentId) {
+      throw new Error("The user message cannot be edited");
+    }
+    if (draft === "") {
+      throw new Error("A message is required");
+    }
+    const parentId = previousUser.parentId;
+    const conversation = await this.requireConversation(previousUser.conversationId);
+    return this.withConversationRequestSlot(conversation.id, async () => {
+      const selection = await this.requireSelection(conversation);
+      const budget = await this.preflightConversation(
+        conversation,
+        selection.model,
+        parentId,
+        draft,
+      );
+      if (budget.status === "over_limit" && !allowOverLimit) {
+        throw new BudgetConfirmationRequiredError(budget);
+      }
+
+      const now = this.now();
+      const turn = await this.repository.createPendingTurn({
+        conversationId: conversation.id,
+        parentId,
+        userMessageId: `message-${this.createId()}`,
+        userBlocks: { version: 1, blocks: [{ type: "text", text: draft }] },
+        assistantMessageId: `message-${this.createId()}`,
+        assistantBlocks: { version: 1, blocks: [] },
+        assistantModelRef: selection.model.id,
+        createdAt: now,
+      });
+      const dispatch = await this.prepareTurn(conversation, selection, turn, now);
+      this.registry.start(dispatch);
+      return { budget, dispatch };
+    });
+  }
+
   async regenerate(assistantMessageId: string, allowOverLimit = false): Promise<SendMessageResult> {
     const previousAssistant = await this.repository.getMessage(assistantMessageId);
     if (
@@ -800,6 +926,47 @@ export class ChatService {
     if (!profile) throw new Error("The selected protocol profile does not exist");
     return { connection, endpoint, model, profile };
   }
+}
+
+function orderBranchPage(messages: Message[]): Message[] {
+  if (messages.length < 2) {
+    return messages;
+  }
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const children = new Map<string, Message[]>();
+  messages.forEach((message) => {
+    if (!message.parentId || !byId.has(message.parentId)) {
+      return;
+    }
+    const existing = children.get(message.parentId) ?? [];
+    existing.push(message);
+    children.set(message.parentId, existing);
+  });
+  const roots = messages
+    .filter((message) => !message.parentId || !byId.has(message.parentId))
+    .sort(compareMessages);
+  const ordered: Message[] = [];
+  const seen = new Set<string>();
+  const visit = (message: Message) => {
+    if (seen.has(message.id)) return;
+    seen.add(message.id);
+    ordered.push(message);
+    (children.get(message.id) ?? []).sort(compareMessages).forEach(visit);
+  };
+  roots.forEach(visit);
+  messages
+    .filter((message) => !seen.has(message.id))
+    .sort(compareMessages)
+    .forEach(visit);
+  return ordered;
+}
+
+function compareMessages(left: Message, right: Message): number {
+  return (
+    left.createdAt - right.createdAt ||
+    left.siblingOrder - right.siblingOrder ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function upgradeTrackedProviderEndpoint(

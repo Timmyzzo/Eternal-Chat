@@ -1,9 +1,11 @@
 import type {
   Conversation,
+  ConversationSearchResult,
   Message,
   MessageBlocks,
   MessageCursor,
   MessagePage,
+  MessageSiblingInfo,
   MessageStatus,
   RequestAttempt,
   RequestSnapshot,
@@ -551,11 +553,87 @@ export class Phase3Repository {
     requireChanged(result.rowsAffected, "conversation configuration");
   }
 
-  async listConversations(): Promise<Conversation[]> {
+  async updateConversationMetadata(value: Conversation): Promise<void> {
+    const result = await this.database.execute(
+      `UPDATE conversation
+      SET title = ?, archived = ?, starred = ?, updated_at = ?
+      WHERE id = ?`,
+      [value.title, toInteger(value.archived), toInteger(value.starred), value.updatedAt, value.id],
+    );
+    requireChanged(result.rowsAffected, "conversation metadata");
+  }
+
+  async listConversations(archived = false): Promise<Conversation[]> {
     const rows = await this.database.select<ConversationRow>(
-      "SELECT * FROM conversation WHERE archived = 0 ORDER BY updated_at DESC, id DESC",
+      "SELECT * FROM conversation WHERE archived = ? ORDER BY updated_at DESC, id DESC",
+      [toInteger(archived)],
     );
     return rows.map(mapConversation);
+  }
+
+  async searchConversations(
+    query: string,
+    archived = false,
+    limit = 40,
+  ): Promise<ConversationSearchResult[]> {
+    const escaped = `%${escapeLike(query.toLocaleLowerCase())}%`;
+    const titleRows = await this.database.select<ConversationRow>(
+      `SELECT * FROM conversation
+      WHERE archived = ? AND lower(title) LIKE ? ESCAPE '\\'
+      ORDER BY updated_at DESC, id DESC
+      LIMIT ?`,
+      [toInteger(archived), escaped, limit],
+    );
+    const messageRows = await this.database.select<ConversationMessageSearchRow>(
+      `SELECT
+        conversation.id AS conversation_id,
+        conversation.title,
+        conversation.archived,
+        message.id AS message_id,
+        message.role,
+        message.updated_at,
+        json_extract(block.value, '$.text') AS match_text
+      FROM conversation
+      JOIN message ON message.conversation_id = conversation.id
+      JOIN json_each(message.blocks_json, '$.blocks') AS block
+      WHERE conversation.archived = ?
+        AND message.role <> 'root'
+        AND json_extract(block.value, '$.type') IN ('text', 'thinking')
+        AND json_type(block.value, '$.text') = 'text'
+        AND lower(json_extract(block.value, '$.text')) LIKE ? ESCAPE '\\'
+      ORDER BY message.updated_at DESC, message.id DESC
+      LIMIT ?`,
+      [toInteger(archived), escaped, Math.max(limit, limit * 4)],
+    );
+    const results = new Map<string, ConversationSearchResult>();
+    titleRows.forEach((row) => {
+      results.set(row.id, {
+        conversationId: row.id,
+        title: row.title,
+        archived: fromInteger(row.archived),
+        messageId: null,
+        role: null,
+        snippet: row.title,
+        updatedAt: row.updated_at,
+      });
+    });
+    messageRows.forEach((row) => {
+      if (results.has(row.conversation_id)) return;
+      results.set(row.conversation_id, {
+        conversationId: row.conversation_id,
+        title: row.title,
+        archived: fromInteger(row.archived),
+        messageId: row.message_id,
+        role: row.role,
+        snippet: searchSnippet(row.match_text, query),
+        updatedAt: row.updated_at,
+      });
+    });
+    return [...results.values()]
+      .sort(
+        (left, right) => right.updatedAt - left.updatedAt || left.title.localeCompare(right.title),
+      )
+      .slice(0, Math.max(1, limit));
   }
 
   async getMessage(id: string): Promise<Message | null> {
@@ -565,6 +643,53 @@ export class Phase3Repository {
       [id],
     );
     return row ? mapMessage(row) : null;
+  }
+
+  async findLatestLeafDescendant(messageId: string): Promise<string | null> {
+    const rows = await this.database.select<{ id: string }>(
+      `WITH RECURSIVE descendants AS (
+        SELECT * FROM message WHERE id = ? AND role <> 'root'
+        UNION ALL
+        SELECT child.*
+        FROM message AS child
+        JOIN descendants AS parent ON child.parent_id = parent.id
+      )
+      SELECT descendants.id
+      FROM descendants
+      WHERE NOT EXISTS (
+        SELECT 1 FROM message AS child WHERE child.parent_id = descendants.id
+      )
+      ORDER BY descendants.updated_at DESC, descendants.created_at DESC, descendants.id DESC
+      LIMIT 1`,
+      [messageId],
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  async listMessageSiblingInfo(messageIds: string[]): Promise<MessageSiblingInfo[]> {
+    if (messageIds.length === 0) return [];
+    const placeholders = messageIds.map(() => "?").join(", ");
+    const rows = await this.database.select<MessageSiblingRow>(
+      `SELECT target.id AS target_id, sibling.*
+      FROM message AS target
+      JOIN message AS sibling
+        ON sibling.parent_id = target.parent_id
+        AND sibling.role = target.role
+      WHERE target.id IN (${placeholders})
+        AND target.role <> 'root'
+      ORDER BY target.id, sibling.sibling_order, sibling.id`,
+      messageIds,
+    );
+    const groups = new Map<string, string[]>();
+    rows.forEach((row) => {
+      const siblingIds = groups.get(row.target_id) ?? [];
+      siblingIds.push(row.id);
+      groups.set(row.target_id, siblingIds);
+    });
+    return messageIds.flatMap((messageId) => {
+      const siblingIds = groups.get(messageId);
+      return siblingIds ? [{ messageId, siblingIds, index: siblingIds.indexOf(messageId) }] : [];
+    });
   }
 
   async readMessageParentChain(anchorMessageId: string): Promise<MessageParentChain> {
@@ -692,31 +817,33 @@ export class Phase3Repository {
 
     const rows = await this.database.select<MessageRow>(
       `WITH RECURSIVE branch AS (
-        SELECT message.*
+        SELECT message.*, 0 AS depth
         FROM message
         JOIN conversation
           ON conversation.active_leaf_message_id = message.id
         WHERE conversation.id = ?
         UNION
-        SELECT parent.*
+        SELECT parent.*, child.depth + 1
         FROM message AS parent
         JOIN branch AS child ON child.parent_id = parent.id
+      ), cursor_depth AS (
+        SELECT depth
+        FROM branch
+        WHERE created_at = ? AND id = ?
       )
-      SELECT *
+      SELECT branch.*
       FROM branch
       WHERE role <> 'root'
         AND (
           ? IS NULL OR
-          created_at < ? OR
-          (created_at = ? AND id < ?)
+          depth > (SELECT depth FROM cursor_depth)
         )
-      ORDER BY created_at DESC, id DESC
+      ORDER BY depth
       LIMIT ?`,
       [
         conversationId,
         cursor?.createdAt ?? null,
-        cursor?.createdAt ?? null,
-        cursor?.createdAt ?? null,
+        cursor?.id ?? null,
         cursor?.id ?? null,
         limit + 1,
       ],
@@ -1216,6 +1343,20 @@ interface MessageRow {
   updated_at: number;
 }
 
+interface MessageSiblingRow extends MessageRow {
+  target_id: string;
+}
+
+interface ConversationMessageSearchRow {
+  conversation_id: string;
+  title: string;
+  archived: number;
+  message_id: string;
+  role: Exclude<Message["role"], "root">;
+  match_text: string;
+  updated_at: number;
+}
+
 interface MessageParentChainRow extends MessageRow {
   cycle_message_id: string | null;
   depth: number;
@@ -1550,6 +1691,21 @@ function decodeNullableJson(value: string | null): JsonValue | null {
 
 function decodePresetBinding(value: string | null): PresetBinding | null {
   return decodeNullableJson(value) as unknown as PresetBinding | null;
+}
+
+function escapeLike(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+function searchSnippet(text: string, query: string): string {
+  const normalized = text.toLocaleLowerCase();
+  const matchAt = normalized.indexOf(query.toLocaleLowerCase());
+  const start = Math.max(0, matchAt < 0 ? 0 : matchAt - 48);
+  const excerpt = text
+    .slice(start, start + 160)
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${start > 0 ? "..." : ""}${excerpt}${start + 160 < text.length ? "..." : ""}`;
 }
 
 function toInteger(value: boolean): number {

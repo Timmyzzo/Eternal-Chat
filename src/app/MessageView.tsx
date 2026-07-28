@@ -1,5 +1,18 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ExternalLink, ListTree, RefreshCw, Search, Square, Wrench } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  ListTree,
+  Pencil,
+  RefreshCw,
+  Search,
+  Square,
+  Wrench,
+  X,
+} from "lucide-react";
 
 import { SafeMarkdown } from "@/app/SafeMarkdown";
 import { FluidSheet } from "@/components/shared/FluidSheet";
@@ -8,6 +21,7 @@ import type {
   CitationBlock,
   Message,
   MessageBlocks,
+  MessageSiblingInfo,
   ProviderStateBlock,
   SourceBlock,
   ThinkingBlock,
@@ -18,19 +32,43 @@ import type { StreamingMessageState } from "@/domain/streaming";
 interface MessageContentProps {
   active?: boolean;
   blocks: MessageBlocks;
+  completed?: boolean;
+  messageId: string;
+  onContentRendered?: () => void;
   onOpenExternal?: (url: string) => void;
+  version?: string | number;
 }
 
-function MessageContent({ active = false, blocks, onOpenExternal }: MessageContentProps) {
+function MessageContent({
+  active = false,
+  blocks,
+  completed = false,
+  messageId,
+  onContentRendered,
+  onOpenExternal,
+  version = 0,
+}: MessageContentProps) {
   return (
     <div className="message-blocks">
-      <StructuredProcess active={active} blocks={blocks} onOpenExternal={onOpenExternal} />
+      <StructuredProcess
+        active={active}
+        blocks={blocks}
+        completed={completed}
+        messageId={messageId}
+        onOpenExternal={onOpenExternal}
+        version={version}
+      />
       {blocks.blocks.map((block, index) => {
         if (block.type === "text" && typeof block.text === "string") {
           return (
             <SafeMarkdown
+              completed={completed}
               key={typeof block.blockId === "string" ? block.blockId : `text-${index}`}
+              messageId={`${messageId}:${typeof block.blockId === "string" ? block.blockId : index}`}
+              onOpenExternal={onOpenExternal}
+              onRendered={onContentRendered}
               text={block.text}
+              version={version}
             />
           );
         }
@@ -52,7 +90,13 @@ function MessageContent({ active = false, blocks, onOpenExternal }: MessageConte
   );
 }
 
-function StructuredProcess({ active, blocks, onOpenExternal }: MessageContentProps) {
+function StructuredProcess({
+  active,
+  blocks,
+  messageId,
+  onOpenExternal,
+  version,
+}: MessageContentProps) {
   const [expanded, setExpanded] = useState(Boolean(active));
   const thinking = blocks.blocks.filter(isThinkingBlock);
   const tools = blocks.blocks.filter(isToolCallBlock);
@@ -106,7 +150,13 @@ function StructuredProcess({ active, blocks, onOpenExternal }: MessageContentPro
           block.text ? (
             <div className="reasoning-entry" key={block.blockId ?? `thinking-${index}`}>
               <strong>{block.label ?? reasoningLabel(block.visibility)}</strong>
-              <SafeMarkdown text={block.text} />
+              <SafeMarkdown
+                completed={!active}
+                messageId={`${messageId}:thinking:${block.blockId ?? index}`}
+                onOpenExternal={onOpenExternal}
+                text={block.text}
+                version={version}
+              />
             </div>
           ) : null,
         )}
@@ -231,15 +281,46 @@ function SourceList({
 
 export const HistoricalMessage = memo(function HistoricalMessage({
   message,
+  onEdit,
+  onContentRendered,
   onOpenExternal,
   onRegenerate,
+  onSwitchSibling,
+  sibling,
 }: {
   message: Message;
+  onEdit?: (messageId: string, text: string) => void;
+  onContentRendered?: () => void;
   onOpenExternal?: (url: string) => void;
   onRegenerate?: (messageId: string) => void;
+  onSwitchSibling?: (messageId: string, direction: -1 | 1) => void;
+  sibling?: MessageSiblingInfo;
 }) {
   const renderCount = useRef(0);
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(() => messageText(message));
   renderCount.current += 1;
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1_200);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  const copyMessage = async () => {
+    const text = messageText(message);
+    if (!navigator.clipboard || text === "") return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  const saveEdit = () => {
+    if (!onEdit || draft.trim() === "") return;
+    onEdit(message.id, draft);
+    setEditing(false);
+  };
   return (
     <article
       className="message-row"
@@ -247,27 +328,129 @@ export const HistoricalMessage = memo(function HistoricalMessage({
       data-render-count={renderCount.current}
       data-message-status={message.status}
       data-role={message.role}
+      tabIndex={-1}
     >
       <header className="message-meta">
         <span>{message.role === "user" ? "You" : "Assistant"}</span>
         <span>{message.status}</span>
       </header>
-      <MessageContent blocks={message.blocks} onOpenExternal={onOpenExternal} />
+      {editing ? (
+        <div className="message-editor">
+          <textarea
+            aria-label="Edit message"
+            autoFocus
+            onChange={(event) => setDraft(event.target.value)}
+            rows={4}
+            value={draft}
+          />
+          <div className="message-editor-actions">
+            <Button
+              aria-label="Cancel editing"
+              onClick={() => {
+                setDraft(messageText(message));
+                setEditing(false);
+              }}
+              size="icon"
+              title="Cancel"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" className="size-4" />
+            </Button>
+            <Button
+              aria-label="Save edited message as a new branch"
+              disabled={draft.trim() === ""}
+              onClick={saveEdit}
+              size="icon"
+              title="Save as new branch"
+              type="button"
+            >
+              <Check aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <MessageContent
+          blocks={message.blocks}
+          completed
+          messageId={message.id}
+          onContentRendered={onContentRendered}
+          onOpenExternal={onOpenExternal}
+          version={message.updatedAt}
+        />
+      )}
       {message.usage ? (
         <output className="message-usage">{formatUsage(message.usage)}</output>
       ) : null}
-      {message.role === "assistant" && onRegenerate && message.status !== "pending" ? (
+      <div className="message-actions">
+        {sibling && sibling.siblingIds.length > 1 && onSwitchSibling ? (
+          <div className="message-branch-control" aria-label="Message branches">
+            <Button
+              aria-label="Previous sibling"
+              disabled={sibling.index <= 0}
+              onClick={() => onSwitchSibling(message.id, -1)}
+              size="icon"
+              title="Previous branch"
+              type="button"
+              variant="ghost"
+            >
+              <ChevronLeft aria-hidden="true" className="size-4" />
+            </Button>
+            <output aria-live="polite">
+              {sibling.index + 1} / {sibling.siblingIds.length}
+            </output>
+            <Button
+              aria-label="Next sibling"
+              disabled={sibling.index >= sibling.siblingIds.length - 1}
+              onClick={() => onSwitchSibling(message.id, 1)}
+              size="icon"
+              title="Next branch"
+              type="button"
+              variant="ghost"
+            >
+              <ChevronRight aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
+        ) : null}
         <Button
-          aria-label="Regenerate response"
-          className="message-action"
-          onClick={() => onRegenerate(message.id)}
+          aria-label={copied ? "Message copied" : "Copy message"}
+          onClick={() => void copyMessage()}
           size="icon"
+          title="Copy"
           type="button"
           variant="ghost"
         >
-          <RefreshCw aria-hidden="true" className="size-4" />
+          {copied ? (
+            <Check aria-hidden="true" className="size-4" />
+          ) : (
+            <Copy aria-hidden="true" className="size-4" />
+          )}
         </Button>
-      ) : null}
+        {message.role === "user" && onEdit ? (
+          <Button
+            aria-label="Edit message"
+            onClick={() => setEditing(true)}
+            size="icon"
+            title="Edit"
+            type="button"
+            variant="ghost"
+          >
+            <Pencil aria-hidden="true" className="size-4" />
+          </Button>
+        ) : null}
+        {message.role === "assistant" && onRegenerate && message.status !== "pending" ? (
+          <Button
+            aria-label="Regenerate response"
+            onClick={() => onRegenerate(message.id)}
+            size="icon"
+            title="Regenerate"
+            type="button"
+            variant="ghost"
+          >
+            <RefreshCw aria-hidden="true" className="size-4" />
+          </Button>
+        ) : null}
+      </div>
     </article>
   );
 });
@@ -296,7 +479,10 @@ export function StreamingMessage({
       <MessageContent
         active={!isTerminalUiStatus(state.status)}
         blocks={state.blocks}
+        completed={isTerminalUiStatus(state.status)}
+        messageId={state.assistantMessageId}
         onOpenExternal={onOpenExternal}
+        version={state.eventSeq}
       />
       {state.status === "waiting_retry" && state.retry ? (
         <RetryWaitStatus onStop={onStop} state={state} />
@@ -451,6 +637,14 @@ function formatUsage(usage: unknown): string {
   const value = usage as Record<string, unknown>;
   const total = value.total_tokens ?? value.totalTokens;
   return typeof total === "number" ? `${total} tokens` : "Usage recorded";
+}
+
+function messageText(message: Message): string {
+  return message.blocks.blocks
+    .flatMap((block) =>
+      block.type === "text" && typeof block.text === "string" ? [block.text] : [],
+    )
+    .join("\n");
 }
 
 function formatCountdown(remainingMs: number): string {

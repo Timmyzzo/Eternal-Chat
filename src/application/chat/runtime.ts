@@ -18,6 +18,10 @@ export interface ApplicationRuntime {
   service: ChatService;
 }
 
+export interface BrowserFixtureRuntimeOptions {
+  phase8PerformanceSeed?: boolean;
+}
+
 export async function createApplicationRuntime(
   repository: ChatRepository,
   bridge: DesktopBridge,
@@ -31,7 +35,9 @@ export async function createApplicationRuntime(
   return { credentials, registry, service };
 }
 
-export async function createBrowserFixtureRuntime(): Promise<ApplicationRuntime> {
+export async function createBrowserFixtureRuntime(
+  options: BrowserFixtureRuntimeOptions = {},
+): Promise<ApplicationRuntime> {
   const repository = new InMemoryChatRepository();
   const runtime = await createApplicationRuntime(repository, new BrowserFixtureBridge());
   const chat = await runtime.service.createProviderConfiguration({
@@ -89,5 +95,10 @@ export async function createBrowserFixtureRuntime(): Promise<ApplicationRuntime>
     checkedAt: 1,
   });
   await runtime.service.createConversation("Phase 5 local fixture", chat.model.id);
+  if (options.phase8PerformanceSeed) {
+    const { seedPhase8PerformanceFixture } =
+      await import("@/application/chat/browserPerformanceFixture");
+    await seedPhase8PerformanceFixture(repository, runtime.service, chat.model.id);
+  }
   return runtime;
 }

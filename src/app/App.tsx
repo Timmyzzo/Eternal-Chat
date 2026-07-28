@@ -1,11 +1,14 @@
 import {
   AlertTriangle,
+  Archive,
+  ArchiveRestore,
   Laptop,
   MessageCircleMore,
   MessagesSquare,
   Moon,
   PanelRight,
   Plus,
+  Search,
   Send,
   Settings2,
   Square,
@@ -13,9 +16,11 @@ import {
 } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useStore } from "zustand";
 
+import { ChatHistoryProvider, createChatHistoryStore } from "@/app/chatHistoryStore";
 import { ConnectionSettings } from "@/app/ConnectionSettings";
-import { HistoricalMessage, StreamingMessage } from "@/app/MessageView";
+import { ConversationMessageList } from "@/app/ConversationMessageList";
 import { RequestInspector } from "@/app/RequestInspector";
 import {
   inspectionFromDispatch,
@@ -23,14 +28,16 @@ import {
   type InspectionState,
 } from "@/app/requestInspection";
 import { useTheme, type ThemeMode } from "@/app/ThemeProvider";
+import { SidebarResizeHandle } from "@/app/SidebarResizeHandle";
 import {
   BudgetConfirmationRequiredError,
+  type ConversationMessageWindow,
   type ProviderSelection,
 } from "@/application/chat/chatService";
 import type { ApplicationRuntime } from "@/application/chat/runtime";
 import { FluidSheet } from "@/components/shared/FluidSheet";
 import { Button } from "@/components/ui/button";
-import type { Conversation, Message, RequestAttempt } from "@/domain/chat";
+import type { Conversation, ConversationSearchResult, RequestAttempt } from "@/domain/chat";
 import type { LosslessBudgetPreflightResult } from "@/domain/context";
 import { isTerminalStatus, type StreamingMessageState } from "@/domain/streaming";
 import type { ProtocolProfile } from "@/domain/provider";
@@ -83,12 +90,12 @@ function AppearanceSettings() {
 
 export function App({ runtime }: { runtime: ApplicationRuntime }) {
   const { credentials, registry, service } = runtime;
+  const [historyStore] = useState(createChatHistoryStore);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selections, setSelections] = useState<ProviderSelection[]>([]);
   const [profiles, setProfiles] = useState<ProtocolProfile[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [newConversationModelRef, setNewConversationModelRef] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
   const [activeState, setActiveState] = useState<StreamingMessageState | null>(null);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [requestConversationId, setRequestConversationId] = useState<string | null>(null);
@@ -98,8 +105,14 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
   const [requestAttempts, setRequestAttempts] = useState<RequestAttempt[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [overLimitDraft, setOverLimitDraft] = useState<string | null>(null);
-  const listRef = useRef<HTMLElement>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<ConversationSearchResult[]>([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const terminalHandled = useRef(new Set<string>());
+  const messageCount = useStore(historyStore, (state) => state.order.length);
 
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
@@ -117,9 +130,13 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
       activeState.status === "waiting_retry");
 
   const refreshCatalog = useCallback(
-    async (preferredModelRef?: string) => {
+    async (
+      preferredModelRef?: string,
+      preferredConversationId?: string | null,
+      archived = showArchived,
+    ) => {
       const [nextConversations, nextSelections, nextProfiles] = await Promise.all([
-        service.listConversations(),
+        service.listConversations(archived),
         service.listProviderSelections(),
         service.listProtocolProfiles(),
       ]);
@@ -133,12 +150,14 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
           : (nextSelections[0]?.model.id ?? "");
       });
       setSelectedConversationId((current) =>
-        nextConversations.some((conversation) => conversation.id === current)
-          ? current
+        nextConversations.some(
+          (conversation) => conversation.id === (preferredConversationId ?? current),
+        )
+          ? (preferredConversationId ?? current)
           : (nextConversations[0]?.id ?? null),
       );
     },
-    [service],
+    [service, showArchived],
   );
 
   useEffect(() => {
@@ -150,7 +169,7 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
     setError(null);
     setOverLimitDraft(null);
     if (!selectedConversationId) {
-      setMessages([]);
+      historyStore.getState().clear();
       setActiveState(null);
       setCurrentRequestId(null);
       setRequestConversationId(null);
@@ -166,14 +185,15 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
     setActiveState(live);
     setCurrentRequestId(live?.requestId ?? null);
     setRequestConversationId(live ? selectedConversationId : null);
-    void service.loadConversationMessages(selectedConversationId).then(async (loaded) => {
+    void service.loadConversationWindow(selectedConversationId).then(async (window) => {
       if (cancelled) {
         return;
       }
-      setMessages(
-        live ? loaded.filter((message) => message.id !== live.assistantMessageId) : loaded,
-      );
-      const assistant = loaded.filter((message) => message.role === "assistant").at(-1);
+      const visibleWindow = live ? excludeWindowMessage(window, live.assistantMessageId) : window;
+      historyStore.getState().setWindow(visibleWindow);
+      const assistant = visibleWindow.messages
+        .filter((message) => message.role === "assistant")
+        .at(-1);
       if (assistant) {
         const snapshot = await service.getSnapshotForAssistant(assistant.id);
         if (!cancelled && snapshot) {
@@ -188,7 +208,7 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
     return () => {
       cancelled = true;
     };
-  }, [registry, selectedConversationId, service]);
+  }, [historyStore, registry, selectedConversationId, service]);
 
   useEffect(() => {
     if (!currentRequestId || !requestConversationId) {
@@ -201,13 +221,14 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
         return;
       }
       terminalHandled.current.add(state.requestId);
-      void registry.whenTerminal(state.requestId).then((terminal) =>
-        Promise.all([
-          service.loadConversationMessages(requestConversationId),
-          service.getSnapshotForAssistant(terminal.assistantMessageId),
-          service.listRequestAttemptsForAssistant(terminal.assistantMessageId),
-        ]).then(([loaded, snapshot, attempts]) => {
-          setMessages(loaded);
+      void registry.whenTerminal(state.requestId).then(async (terminal) => {
+        try {
+          const [window, snapshot, attempts] = await Promise.all([
+            service.loadConversationWindow(requestConversationId),
+            service.getSnapshotForAssistant(terminal.assistantMessageId),
+            service.listRequestAttemptsForAssistant(terminal.assistantMessageId),
+          ]);
+          historyStore.getState().setWindow(window);
           setActiveState(null);
           setCurrentRequestId(null);
           setRequestConversationId(null);
@@ -216,10 +237,13 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
             setInspection(inspectionFromSnapshot(snapshot));
           }
           void refreshCatalog();
-        }),
-      );
+        } finally {
+          terminalHandled.current.delete(state.requestId);
+          registry.removeTerminal(state.requestId);
+        }
+      });
     });
-  }, [currentRequestId, refreshCatalog, registry, requestConversationId, service]);
+  }, [currentRequestId, historyStore, refreshCatalog, registry, requestConversationId, service]);
 
   useEffect(() => {
     if (!selectedConversationId) {
@@ -241,33 +265,35 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
   }, [composer, selectedConversationId, service]);
 
   useEffect(() => {
-    const list = listRef.current;
-    if (list) {
-      list.scrollTop = list.scrollHeight;
+    const normalized = searchQuery.trim();
+    if (normalized === "") {
+      setSearchResults([]);
+      return;
     }
-  }, [activeState?.blocks, messages.length]);
-
-  useEffect(() => {
-    const stopOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && currentRequestId) {
-        registry.stop(currentRequestId);
-      }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void service.searchConversations(normalized, showArchived).then((results) => {
+        if (!cancelled) setSearchResults(results);
+      });
+    }, 120);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
     };
-    window.addEventListener("keydown", stopOnEscape);
-    return () => window.removeEventListener("keydown", stopOnEscape);
-  }, [currentRequestId, registry]);
+  }, [searchQuery, service, showArchived]);
 
   const attachDispatch = useCallback(
     async (result: Awaited<ReturnType<typeof service.sendMessage>>, conversationId: string) => {
       const { dispatch } = result;
+      const window = excludeWindowMessage(
+        await service.loadConversationWindow(conversationId),
+        dispatch.assistantPlaceholder.id,
+      );
       terminalHandled.current.delete(dispatch.transportRequest.requestId);
       setInspection(inspectionFromDispatch(dispatch));
       setRequestAttempts(registry.get(dispatch.transportRequest.requestId)?.attempts ?? []);
       setBudget(result.budget);
-      setMessages((current) => [
-        ...current.filter((message) => message.id !== dispatch.userMessage.id),
-        dispatch.userMessage,
-      ]);
+      historyStore.getState().setWindow(window);
       setActiveState(registry.get(dispatch.transportRequest.requestId));
       setCurrentRequestId(dispatch.transportRequest.requestId);
       setRequestConversationId(conversationId);
@@ -275,7 +301,7 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
       setOverLimitDraft(null);
       setError(null);
     },
-    [registry, service],
+    [historyStore, registry, service],
   );
 
   const send = useCallback(
@@ -294,11 +320,13 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
           setOverLimitDraft(draft);
         } else {
           setError(cause instanceof Error ? cause.message : "The message could not be sent.");
-          void service.loadConversationMessages(selectedConversationId).then(setMessages);
+          void service
+            .loadConversationWindow(selectedConversationId)
+            .then((window) => historyStore.getState().setWindow(window));
         }
       }
     },
-    [attachDispatch, requestActive, selectedConversationId, service],
+    [attachDispatch, historyStore, requestActive, selectedConversationId, service],
   );
 
   const regenerate = useCallback(
@@ -308,10 +336,6 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
       }
       try {
         const result = await service.regenerate(assistantMessageId, allowOverLimit);
-        const loaded = await service.loadConversationMessages(selectedConversationId);
-        setMessages(
-          loaded.filter((message) => message.id !== result.dispatch.assistantPlaceholder.id),
-        );
         await attachDispatch(result, selectedConversationId);
       } catch (cause) {
         if (cause instanceof BudgetConfirmationRequiredError) {
@@ -327,6 +351,92 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
     [attachDispatch, requestActive, selectedConversationId, service],
   );
 
+  const editMessage = useCallback(
+    async (messageId: string, text: string) => {
+      if (!selectedConversationId || requestActive) return;
+      try {
+        await attachDispatch(
+          await service.editUserMessage(messageId, text),
+          selectedConversationId,
+        );
+      } catch (cause) {
+        if (cause instanceof BudgetConfirmationRequiredError) {
+          setBudget(cause.budget);
+          setError("The edited branch exceeds the configured context limit.");
+        } else {
+          setError(cause instanceof Error ? cause.message : "The message could not be edited.");
+        }
+      }
+    },
+    [attachDispatch, requestActive, selectedConversationId, service],
+  );
+
+  const switchSibling = useCallback(
+    async (messageId: string, direction: -1 | 1) => {
+      if (!selectedConversationId || requestActive) return;
+      try {
+        const targetId = await service.switchMessageSibling(messageId, direction);
+        historyStore
+          .getState()
+          .setWindow(await service.loadConversationWindow(selectedConversationId));
+        setFocusMessageId(targetId);
+        await refreshCatalog(undefined, selectedConversationId);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "The branch could not be changed.");
+      }
+    },
+    [historyStore, refreshCatalog, requestActive, selectedConversationId, service],
+  );
+
+  const loadOlder = useCallback(async () => {
+    if (!selectedConversationId || loadingOlder) return;
+    const cursor = historyStore.getState().nextCursor;
+    if (!cursor) return;
+    setLoadingOlder(true);
+    try {
+      historyStore
+        .getState()
+        .prependWindow(await service.loadConversationWindow(selectedConversationId, cursor));
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [historyStore, loadingOlder, selectedConversationId, service]);
+
+  const returnLatest = useCallback(async () => {
+    if (!selectedConversationId) return;
+    const window = await service.loadConversationWindow(selectedConversationId);
+    historyStore
+      .getState()
+      .setWindow(
+        activeState ? excludeWindowMessage(window, activeState.assistantMessageId) : window,
+      );
+  }, [activeState, historyStore, selectedConversationId, service]);
+
+  const openSearchResult = useCallback(
+    async (result: ConversationSearchResult) => {
+      try {
+        await service.activateSearchResult(result);
+        setFocusMessageId(result.messageId);
+        await refreshCatalog(undefined, result.conversationId, result.archived);
+        setSelectedConversationId(result.conversationId);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "The search result could not be opened.");
+      }
+    },
+    [refreshCatalog, service],
+  );
+
+  const setArchived = useCallback(async () => {
+    if (!selectedConversationId) return;
+    try {
+      await service.setConversationArchived(selectedConversationId, !showArchived);
+      setSearchQuery("");
+      await refreshCatalog(undefined, null, showArchived);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The conversation could not be archived.");
+    }
+  }, [refreshCatalog, selectedConversationId, service, showArchived]);
+
   const openExternal = useCallback(
     (url: string) => {
       void service
@@ -336,7 +446,7 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
     [service],
   );
 
-  const createConversation = async () => {
+  const createConversation = useCallback(async () => {
     if (!newConversationModelRef) {
       setError("Configure a connection before creating a conversation.");
       return;
@@ -346,12 +456,34 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
         "New conversation",
         newConversationModelRef,
       );
-      await refreshCatalog(newConversationModelRef);
+      setShowArchived(false);
+      await refreshCatalog(newConversationModelRef, conversation.id, false);
       setSelectedConversationId(conversation.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The conversation could not be created.");
     }
-  };
+  }, [newConversationModelRef, refreshCatalog, service]);
+
+  const clearFocusMessage = useCallback(() => setFocusMessageId(null), []);
+  const stopCurrentRequest = useCallback(() => {
+    if (currentRequestId) registry.stop(currentRequestId);
+  }, [currentRequestId, registry]);
+
+  useEffect(() => {
+    const handleShortcut = (event: globalThis.KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLocaleLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      } else if (event.key.toLocaleLowerCase() === "n") {
+        event.preventDefault();
+        void createConversation();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [createConversation]);
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -367,223 +499,316 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
   );
 
   return (
-    <div className="app-layout" data-ui="app.window">
-      <aside className="conversation-sidebar" data-ui="app.sidebar">
-        <header className="brand-header">
-          <span className="brand-mark">
-            <MessageCircleMore aria-hidden="true" className="size-4" />
-          </span>
-          <span>Eternal Chat</span>
-        </header>
+    <ChatHistoryProvider store={historyStore}>
+      <div className="app-layout" data-ui="app.window">
+        <aside className="conversation-sidebar" data-ui="app.sidebar">
+          <header className="brand-header">
+            <span className="brand-mark">
+              <MessageCircleMore aria-hidden="true" className="size-4" />
+            </span>
+            <span>Eternal Chat</span>
+          </header>
 
-        <div className="sidebar-toolbar">
-          <Button aria-label="New conversation" onClick={createConversation} size="icon">
-            <Plus aria-hidden="true" className="size-4" />
-          </Button>
-          <label className="model-select-label">
-            <span className="sr-only">Model for new conversation</span>
-            <select
-              aria-label="Model for new conversation"
-              disabled={selections.length === 0}
-              onChange={(event) => setNewConversationModelRef(event.target.value)}
-              value={newConversationModelRef}
-            >
-              {selections.length === 0 ? <option value="">No models</option> : null}
-              {selections.map((selection) => (
-                <option key={selection.model.id} value={selection.model.id}>
-                  {selection.model.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <FluidSheet
-            closeLabel="Close connection settings"
-            contentClassName="connection-settings-sheet"
-            description="Connection and protocol settings"
-            title="Connections"
-            trigger={
-              <Button aria-label="Open connection settings" size="icon" variant="ghost">
-                <Settings2 aria-hidden="true" className="size-4" />
-              </Button>
-            }
-            triggerTooltip="Connections"
-          >
-            <ConnectionSettings
-              conversation={selectedConversation}
-              credentials={credentials}
-              onChanged={(selection) => void refreshCatalog(selection?.model.id)}
-              profiles={profiles}
-              selections={selections}
-              service={service}
-            />
-          </FluidSheet>
-          <FluidSheet
-            closeLabel="Close appearance settings"
-            description="Appearance settings"
-            title="Appearance"
-            trigger={
-              <Button aria-label="Open appearance settings" size="icon" variant="ghost">
-                <Sun aria-hidden="true" className="size-4" />
-              </Button>
-            }
-            triggerTooltip="Appearance"
-          >
-            <AppearanceSettings />
-          </FluidSheet>
-        </div>
-
-        <nav aria-label="Conversations" className="conversation-list">
-          {conversations.length === 0 ? (
-            <div className="sidebar-empty">
-              <MessagesSquare aria-hidden="true" className="size-5" />
-              <span>No conversations</span>
-            </div>
-          ) : (
-            conversations.map((conversation) => (
-              <button
-                aria-current={conversation.id === selectedConversationId ? "page" : undefined}
-                className={cn(
-                  "conversation-item",
-                  conversation.id === selectedConversationId && "conversation-item-selected",
-                )}
-                key={conversation.id}
-                onClick={() => setSelectedConversationId(conversation.id)}
-                type="button"
+          <div className="sidebar-toolbar">
+            <Button aria-label="New conversation" onClick={createConversation} size="icon">
+              <Plus aria-hidden="true" className="size-4" />
+            </Button>
+            <label className="model-select-label">
+              <span className="sr-only">Model for new conversation</span>
+              <select
+                aria-label="Model for new conversation"
+                disabled={selections.length === 0}
+                onChange={(event) => setNewConversationModelRef(event.target.value)}
+                value={newConversationModelRef}
               >
-                <MessagesSquare aria-hidden="true" className="size-4" />
-                <span>{conversation.title}</span>
-              </button>
-            ))
-          )}
-        </nav>
-      </aside>
-
-      <main className="chat-workspace" data-ui="app.content chat.view">
-        <header className="chat-header">
-          <div className="chat-heading">
-            <h1>{selectedConversation?.title ?? "Conversations"}</h1>
-            <span>{selectedModel?.model.displayName ?? "No model selected"}</span>
-          </div>
-          <div className="mobile-inspector-trigger">
+                {selections.length === 0 ? <option value="">No models</option> : null}
+                {selections.map((selection) => (
+                  <option key={selection.model.id} value={selection.model.id}>
+                    {selection.model.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
             <FluidSheet
-              closeLabel="Close request inspector"
-              description="Frozen request and context inspection"
-              title="Request inspector"
+              closeLabel="Close connection settings"
+              contentClassName="connection-settings-sheet"
+              description="Connection and protocol settings"
+              title="Connections"
               trigger={
-                <Button aria-label="Open request inspector" size="icon" variant="ghost">
-                  <PanelRight aria-hidden="true" className="size-4" />
+                <Button aria-label="Open connection settings" size="icon" variant="ghost">
+                  <Settings2 aria-hidden="true" className="size-4" />
                 </Button>
               }
-              triggerTooltip="Request inspector"
+              triggerTooltip="Connections"
             >
-              {inspector}
+              <ConnectionSettings
+                conversation={selectedConversation}
+                credentials={credentials}
+                onChanged={(selection) => void refreshCatalog(selection?.model.id)}
+                profiles={profiles}
+                selections={selections}
+                service={service}
+              />
+            </FluidSheet>
+            <FluidSheet
+              closeLabel="Close appearance settings"
+              description="Appearance settings"
+              title="Appearance"
+              trigger={
+                <Button aria-label="Open appearance settings" size="icon" variant="ghost">
+                  <Sun aria-hidden="true" className="size-4" />
+                </Button>
+              }
+              triggerTooltip="Appearance"
+            >
+              <AppearanceSettings />
             </FluidSheet>
           </div>
-        </header>
 
-        <section className="message-list" data-ui="chat.message-list" ref={listRef}>
-          {!selectedConversation ? (
-            <div className="empty-workspace">
-              <MessageCircleMore aria-hidden="true" className="size-6" />
-              <h2>No conversation selected</h2>
-            </div>
-          ) : messages.length === 0 && !activeState ? (
-            <div className="empty-workspace">
-              <MessageCircleMore aria-hidden="true" className="size-6" />
-              <h2>New conversation</h2>
-            </div>
-          ) : (
-            <div className="message-stack">
-              {messages.map((message) => (
-                <HistoricalMessage
-                  key={message.id}
-                  message={message}
-                  onOpenExternal={openExternal}
-                  onRegenerate={message.role === "assistant" ? regenerate : undefined}
-                />
-              ))}
-              {activeState ? (
-                <StreamingMessage
-                  onOpenExternal={openExternal}
-                  onStop={currentRequestId ? () => registry.stop(currentRequestId) : undefined}
-                  state={activeState}
-                />
-              ) : null}
-            </div>
-          )}
-        </section>
-
-        <footer className="composer-footer">
-          {error ? (
-            <div className="composer-alert" role="alert">
-              <AlertTriangle aria-hidden="true" className="size-4" />
-              <span>{error}</span>
-              <button aria-label="Dismiss error" onClick={() => setError(null)} type="button">
-                Dismiss
-              </button>
-            </div>
-          ) : null}
-          {overLimitDraft ? (
-            <div className="composer-alert budget-confirmation" role="alert">
-              <AlertTriangle aria-hidden="true" className="size-4" />
-              <span>Lossless context is over the configured limit.</span>
-              <button onClick={() => void send(overLimitDraft, true)} type="button">
-                Send losslessly
-              </button>
-              <button onClick={() => setOverLimitDraft(null)} type="button">
-                Review
-              </button>
-            </div>
-          ) : null}
-          <div className="composer-row" data-ui="chat.composer">
-            <textarea
-              aria-label="Message"
-              className="composer-input"
-              disabled={!selectedConversation || requestActive}
-              onChange={(event) => setComposer(event.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              placeholder={selectedConversation ? "Message" : "Select a conversation"}
-              rows={2}
-              value={composer}
-            />
-            {requestActive && currentRequestId ? (
-              <Button
-                aria-keyshortcuts="Escape"
-                aria-label="Stop generation"
-                onClick={() => registry.stop(currentRequestId)}
-                size="icon"
+          <div className="sidebar-library-controls">
+            <label className="conversation-search">
+              <Search aria-hidden="true" className="size-4" />
+              <input
+                aria-keyshortcuts="Control+K Meta+K"
+                aria-label="Search conversations"
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search"
+                ref={searchInputRef}
+                type="search"
+                value={searchQuery}
+              />
+            </label>
+            <div aria-label="Conversation library" className="library-segments" role="group">
+              <button
+                aria-pressed={!showArchived}
+                onClick={() => {
+                  setSearchQuery("");
+                  setShowArchived(false);
+                }}
                 type="button"
-                variant="outline"
               >
-                <Square aria-hidden="true" className="size-4 fill-current" />
-              </Button>
+                Recent
+              </button>
+              <button
+                aria-pressed={showArchived}
+                onClick={() => {
+                  setSearchQuery("");
+                  setShowArchived(true);
+                }}
+                type="button"
+              >
+                Archived
+              </button>
+            </div>
+          </div>
+
+          <nav aria-label="Conversations" className="conversation-list">
+            {searchQuery.trim() !== "" ? (
+              searchResults.length === 0 ? (
+                <div className="sidebar-empty">
+                  <Search aria-hidden="true" className="size-5" />
+                  <span>No matches</span>
+                </div>
+              ) : (
+                searchResults.map((result) => (
+                  <button
+                    className="conversation-item conversation-search-result"
+                    key={`${result.conversationId}:${result.messageId ?? "title"}`}
+                    onClick={() => void openSearchResult(result)}
+                    type="button"
+                  >
+                    <Search aria-hidden="true" className="size-4" />
+                    <span>
+                      <strong>{result.title}</strong>
+                      <small>{result.snippet}</small>
+                    </span>
+                  </button>
+                ))
+              )
+            ) : conversations.length === 0 ? (
+              <div className="sidebar-empty">
+                {showArchived ? (
+                  <Archive aria-hidden="true" className="size-5" />
+                ) : (
+                  <MessagesSquare aria-hidden="true" className="size-5" />
+                )}
+                <span>{showArchived ? "No archived conversations" : "No conversations"}</span>
+              </div>
             ) : (
-              <Button
-                aria-label="Send message"
-                disabled={!selectedConversation || composer.trim() === ""}
-                onClick={() => void send(composer)}
-                size="icon"
-                type="button"
-              >
-                <Send aria-hidden="true" className="size-4" />
-              </Button>
+              conversations.map((conversation) => (
+                <button
+                  aria-current={conversation.id === selectedConversationId ? "page" : undefined}
+                  className={cn(
+                    "conversation-item",
+                    conversation.id === selectedConversationId && "conversation-item-selected",
+                  )}
+                  key={conversation.id}
+                  onClick={() => setSelectedConversationId(conversation.id)}
+                  type="button"
+                >
+                  <MessagesSquare aria-hidden="true" className="size-4" />
+                  <span>{conversation.title}</span>
+                </button>
+              ))
             )}
-          </div>
-          <div className="composer-status">
-            <span className={`budget-badge budget-${budget?.status ?? "uncertain"}`}>
-              {(budget?.status ?? "uncertain").replace("_", " ")}
-            </span>
-            <span aria-live="polite">{requestActive ? activeState?.status : "ready"}</span>
-          </div>
-        </footer>
-      </main>
+          </nav>
+          <SidebarResizeHandle />
+        </aside>
 
-      <aside className="request-inspector" aria-label="Request inspector">
-        <header>
-          <h2>Request inspector</h2>
-        </header>
-        {inspector}
-      </aside>
-    </div>
+        <main className="chat-workspace" data-ui="app.content chat.view">
+          <header className="chat-header">
+            <div className="chat-heading">
+              <h1>{selectedConversation?.title ?? "Conversations"}</h1>
+              <span>{selectedModel?.model.displayName ?? "No model selected"}</span>
+            </div>
+            <div className="chat-header-actions">
+              {selectedConversation ? (
+                <Button
+                  aria-label={showArchived ? "Restore conversation" : "Archive conversation"}
+                  onClick={() => void setArchived()}
+                  size="icon"
+                  title={showArchived ? "Restore" : "Archive"}
+                  type="button"
+                  variant="ghost"
+                >
+                  {showArchived ? (
+                    <ArchiveRestore aria-hidden="true" className="size-4" />
+                  ) : (
+                    <Archive aria-hidden="true" className="size-4" />
+                  )}
+                </Button>
+              ) : null}
+              <div className="mobile-inspector-trigger">
+                <FluidSheet
+                  closeLabel="Close request inspector"
+                  description="Frozen request and context inspection"
+                  title="Request inspector"
+                  trigger={
+                    <Button aria-label="Open request inspector" size="icon" variant="ghost">
+                      <PanelRight aria-hidden="true" className="size-4" />
+                    </Button>
+                  }
+                  triggerTooltip="Request inspector"
+                >
+                  {inspector}
+                </FluidSheet>
+              </div>
+            </div>
+          </header>
+
+          {!selectedConversation ? (
+            <section className="message-list" data-ui="chat.message-list">
+              <div className="empty-workspace">
+                <MessageCircleMore aria-hidden="true" className="size-6" />
+                <h2>No conversation selected</h2>
+              </div>
+            </section>
+          ) : messageCount === 0 && !activeState ? (
+            <section className="message-list" data-ui="chat.message-list">
+              <div className="empty-workspace">
+                <MessageCircleMore aria-hidden="true" className="size-6" />
+                <h2>New conversation</h2>
+              </div>
+            </section>
+          ) : (
+            <ConversationMessageList
+              activeState={activeState}
+              conversationId={selectedConversation.id}
+              focusMessageId={focusMessageId}
+              loadingOlder={loadingOlder}
+              onEdit={editMessage}
+              onFocusHandled={clearFocusMessage}
+              onLoadOlder={loadOlder}
+              onOpenExternal={openExternal}
+              onRegenerate={regenerate}
+              onReturnLatest={returnLatest}
+              onStop={currentRequestId ? stopCurrentRequest : undefined}
+              onSwitchSibling={switchSibling}
+            />
+          )}
+
+          <footer className="composer-footer">
+            {error ? (
+              <div className="composer-alert" role="alert">
+                <AlertTriangle aria-hidden="true" className="size-4" />
+                <span>{error}</span>
+                <button aria-label="Dismiss error" onClick={() => setError(null)} type="button">
+                  Dismiss
+                </button>
+              </div>
+            ) : null}
+            {overLimitDraft ? (
+              <div className="composer-alert budget-confirmation" role="alert">
+                <AlertTriangle aria-hidden="true" className="size-4" />
+                <span>Lossless context is over the configured limit.</span>
+                <button onClick={() => void send(overLimitDraft, true)} type="button">
+                  Send losslessly
+                </button>
+                <button onClick={() => setOverLimitDraft(null)} type="button">
+                  Review
+                </button>
+              </div>
+            ) : null}
+            <div className="composer-row" data-ui="chat.composer">
+              <textarea
+                aria-label="Message"
+                className="composer-input"
+                disabled={!selectedConversation}
+                onChange={(event) => setComposer(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
+                placeholder={selectedConversation ? "Message" : "Select a conversation"}
+                rows={2}
+                value={composer}
+              />
+              {requestActive && currentRequestId ? (
+                <Button
+                  aria-label="Stop generation"
+                  onClick={() => registry.stop(currentRequestId)}
+                  size="icon"
+                  type="button"
+                  variant="outline"
+                >
+                  <Square aria-hidden="true" className="size-4 fill-current" />
+                </Button>
+              ) : (
+                <Button
+                  aria-label="Send message"
+                  disabled={!selectedConversation || composer.trim() === ""}
+                  onClick={() => void send(composer)}
+                  size="icon"
+                  type="button"
+                >
+                  <Send aria-hidden="true" className="size-4" />
+                </Button>
+              )}
+            </div>
+            <div className="composer-status">
+              <span className={`budget-badge budget-${budget?.status ?? "uncertain"}`}>
+                {(budget?.status ?? "uncertain").replace("_", " ")}
+              </span>
+              <span aria-live="polite">{requestActive ? activeState?.status : "ready"}</span>
+            </div>
+          </footer>
+        </main>
+
+        <aside className="request-inspector" aria-label="Request inspector">
+          <header>
+            <h2>Request inspector</h2>
+          </header>
+          {inspector}
+        </aside>
+      </div>
+    </ChatHistoryProvider>
   );
+}
+
+function excludeWindowMessage(
+  window: ConversationMessageWindow,
+  messageId: string,
+): ConversationMessageWindow {
+  return {
+    messages: window.messages.filter((message) => message.id !== messageId),
+    nextCursor: window.nextCursor,
+    siblings: window.siblings.filter((info) => info.messageId !== messageId),
+  };
 }

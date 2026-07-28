@@ -1,9 +1,11 @@
 import type {
   Conversation,
+  ConversationSearchResult,
   Message,
   MessageBlocks,
   MessageCursor,
   MessagePage,
+  MessageSiblingInfo,
   RequestAttempt,
   RequestSnapshot,
 } from "@/domain/chat";
@@ -208,15 +210,116 @@ export class InMemoryChatRepository {
     this.conversations.set(value.id, clone(value));
   }
 
-  async listConversations(): Promise<Conversation[]> {
+  async updateConversationMetadata(value: Conversation): Promise<void> {
+    if (!this.conversations.has(value.id)) {
+      throw new Error(`Conversation ${value.id} does not exist`);
+    }
+    this.conversations.set(value.id, clone(value));
+  }
+
+  async listConversations(archived = false): Promise<Conversation[]> {
     return [...this.conversations.values()]
-      .filter((conversation) => !conversation.archived)
+      .filter((conversation) => conversation.archived === archived)
       .sort((left, right) => right.updatedAt - left.updatedAt || right.id.localeCompare(left.id))
+      .map(clone);
+  }
+
+  async searchConversations(
+    query: string,
+    archived = false,
+    limit = 40,
+  ): Promise<ConversationSearchResult[]> {
+    const normalized = query.toLocaleLowerCase();
+    const results: ConversationSearchResult[] = [];
+    for (const conversation of this.conversations.values()) {
+      if (conversation.archived !== archived) continue;
+      if (conversation.title.toLocaleLowerCase().includes(normalized)) {
+        results.push({
+          conversationId: conversation.id,
+          title: conversation.title,
+          archived: conversation.archived,
+          messageId: null,
+          role: null,
+          snippet: conversation.title,
+          updatedAt: conversation.updatedAt,
+        });
+        continue;
+      }
+      const match = [...this.messages.values()]
+        .filter(
+          (message) =>
+            message.conversationId === conversation.id &&
+            message.role !== "root" &&
+            searchableMessageText(message).toLocaleLowerCase().includes(normalized),
+        )
+        .sort(
+          (left, right) => right.updatedAt - left.updatedAt || right.id.localeCompare(left.id),
+        )[0];
+      if (!match || match.role === "root") continue;
+      results.push({
+        conversationId: conversation.id,
+        title: conversation.title,
+        archived: conversation.archived,
+        messageId: match.id,
+        role: match.role,
+        snippet: searchSnippet(searchableMessageText(match), query),
+        updatedAt: match.updatedAt,
+      });
+    }
+    return results
+      .sort(
+        (left, right) => right.updatedAt - left.updatedAt || left.title.localeCompare(right.title),
+      )
+      .slice(0, Math.max(1, limit))
       .map(clone);
   }
 
   async getMessage(id: string): Promise<Message | null> {
     return cloneOrNull(this.messages.get(id));
+  }
+
+  async findLatestLeafDescendant(messageId: string): Promise<string | null> {
+    const start = this.messages.get(messageId);
+    if (!start || start.role === "root") return null;
+    const leaves: Message[] = [];
+    const pending = [start];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (!current) continue;
+      const children = [...this.messages.values()].filter(
+        (message) => message.parentId === current.id,
+      );
+      if (children.length === 0) {
+        leaves.push(current);
+      } else {
+        pending.push(...children);
+      }
+    }
+    return (
+      leaves.sort(
+        (left, right) =>
+          right.updatedAt - left.updatedAt ||
+          right.createdAt - left.createdAt ||
+          right.id.localeCompare(left.id),
+      )[0]?.id ?? null
+    );
+  }
+
+  async listMessageSiblingInfo(messageIds: string[]): Promise<MessageSiblingInfo[]> {
+    return messageIds.flatMap((messageId) => {
+      const message = this.messages.get(messageId);
+      if (!message?.parentId || message.role === "root") return [];
+      const siblingIds = [...this.messages.values()]
+        .filter(
+          (candidate) => candidate.parentId === message.parentId && candidate.role === message.role,
+        )
+        .sort(
+          (left, right) =>
+            left.siblingOrder - right.siblingOrder || left.id.localeCompare(right.id),
+        )
+        .map((candidate) => candidate.id);
+      return [{ messageId, siblingIds, index: siblingIds.indexOf(messageId) }];
+    });
   }
 
   async readMessageParentChain(anchorMessageId: string): Promise<MessageParentChain> {
@@ -324,6 +427,19 @@ export class InMemoryChatRepository {
     this.messages.set(id, { ...message, blocks: clone(blocks), status, updatedAt });
   }
 
+  async setActiveLeaf(conversationId: string, messageId: string, updatedAt: number): Promise<void> {
+    const conversation = this.requireConversation(conversationId);
+    const message = this.requireMessage(messageId);
+    if (message.conversationId !== conversationId || message.role === "root") {
+      throw new Error("Active leaf message is invalid");
+    }
+    this.conversations.set(conversationId, {
+      ...conversation,
+      activeLeafMessageId: messageId,
+      updatedAt,
+    });
+  }
+
   async listActiveBranchPage(
     conversationId: string,
     cursor: MessageCursor | null = null,
@@ -339,20 +455,21 @@ export class InMemoryChatRepository {
       }
       currentId = message.parentId;
     }
-    const filtered = branch
-      .filter(
-        (message) =>
-          !cursor ||
-          message.createdAt < cursor.createdAt ||
-          (message.createdAt === cursor.createdAt && message.id < cursor.id),
-      )
-      .sort((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id));
-    const messages = filtered.slice(0, limit).map(clone);
+    const cursorIndex = cursor
+      ? branch.findIndex(
+          (message) => message.createdAt === cursor.createdAt && message.id === cursor.id,
+        )
+      : -1;
+    if (cursor && cursorIndex < 0) {
+      return { messages: [], nextCursor: null };
+    }
+    const remaining = branch.slice(cursorIndex + 1);
+    const messages = remaining.slice(0, limit).map(clone);
     const oldest = messages.at(-1);
     return {
       messages,
       nextCursor:
-        filtered.length > limit && oldest ? { createdAt: oldest.createdAt, id: oldest.id } : null,
+        remaining.length > limit && oldest ? { createdAt: oldest.createdAt, id: oldest.id } : null,
     };
   }
 
@@ -629,6 +746,27 @@ export class InMemoryChatRepository {
     }
     return attempt;
   }
+}
+
+function searchableMessageText(message: Message): string {
+  return message.blocks.blocks
+    .flatMap((block) =>
+      (block.type === "text" || block.type === "thinking") && typeof block.text === "string"
+        ? [block.text]
+        : [],
+    )
+    .join("\n");
+}
+
+function searchSnippet(text: string, query: string): string {
+  const normalized = text.toLocaleLowerCase();
+  const matchAt = normalized.indexOf(query.toLocaleLowerCase());
+  const start = Math.max(0, matchAt < 0 ? 0 : matchAt - 48);
+  const excerpt = text
+    .slice(start, start + 160)
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${start > 0 ? "..." : ""}${excerpt}${start + 160 < text.length ? "..." : ""}`;
 }
 
 function nextSiblingOrder(messages: Iterable<Message>, parentId: string): number {

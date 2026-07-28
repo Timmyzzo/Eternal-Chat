@@ -167,6 +167,56 @@ describe("ActiveRequestRegistry", () => {
     expect(persistence.checkpointAttempts).toBe(2);
     expect(persistence.finalized).toHaveLength(1);
   });
+
+  it("bounds detached terminal entries and releases transport ownership", async () => {
+    const bridge = new FakeDesktopBridge();
+    const persistence = new CapturePersistence();
+    const registry = new ActiveRequestRegistry(bridge, persistence, () => 90, {
+      maxRetainedTerminalEntries: 3,
+    });
+    const requestIds: string[] = [];
+
+    for (let index = 0; index < 8; index += 1) {
+      const dispatch = createDispatch(`request-retained-${index}`);
+      const requestId = dispatch.transportRequest.requestId;
+      requestIds.push(requestId);
+      registry.start(dispatch);
+      await vi.waitFor(() => expect(bridge.startedRequests).toHaveLength(index + 1));
+      const terminal = registry.whenTerminal(requestId);
+      bridge.emit({
+        type: "data",
+        requestId,
+        data: [
+          JSON.stringify({
+            choices: [{ delta: { content: String(index) }, finish_reason: "stop" }],
+          }),
+          "[DONE]",
+        ],
+      });
+      await terminal;
+    }
+
+    expect(registry.diagnostics()).toEqual({
+      activeEntries: 0,
+      entries: 3,
+      retryTimers: 0,
+      subscribers: 0,
+      terminalEntries: 3,
+      transportOwners: 3,
+    });
+    await expect(registry.whenTerminal(requestIds[0]!)).rejects.toThrow("is not registered");
+    expect(registry.latestForConversation("conversation-1")?.requestId).toBe(requestIds.at(-1));
+
+    requestIds.slice(-3).forEach((requestId) => registry.removeTerminal(requestId));
+    expect(registry.diagnostics()).toEqual({
+      activeEntries: 0,
+      entries: 0,
+      retryTimers: 0,
+      subscribers: 0,
+      terminalEntries: 0,
+      transportOwners: 0,
+    });
+  });
 });
 
 class CapturePersistence implements ActiveRequestPersistence {

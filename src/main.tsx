@@ -36,7 +36,10 @@ function renderApplication(runtime: ApplicationRuntime) {
 
 async function createRuntime(): Promise<ApplicationRuntime> {
   if (!isTauri()) {
-    return createBrowserFixtureRuntime();
+    const fixture = new URLSearchParams(window.location.search).get("fixture");
+    return createBrowserFixtureRuntime({
+      phase8PerformanceSeed: import.meta.env.DEV && fixture === "phase8-performance",
+    });
   }
   const repository = await initializePersistence();
   const bridge = new TauriDesktopBridge({

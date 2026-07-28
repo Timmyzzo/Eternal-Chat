@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -40,8 +40,8 @@ describe("App", () => {
 
     await user.type(composer, "Hello from the UI{enter}");
     expect(await screen.findByRole("button", { name: "Stop generation" })).toBeVisible();
-    expect(await screen.findByText(/Phase 5 pipeline/)).toBeVisible();
     expect(await screen.findByRole("button", { name: "Regenerate response" })).toBeVisible();
+    expect(screen.getByText(/Phase 5 pipeline/)).toBeVisible();
     expect(screen.getByRole("heading", { name: "Field sources" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Stop generation" })).not.toBeInTheDocument();
   });
@@ -58,6 +58,23 @@ describe("App", () => {
       expect(container.querySelector('[data-message-status="interrupted"]')).toBeInTheDocument(),
     );
     expect(screen.getByText("Generation stopped.")).toBeVisible();
+  });
+
+  it("does not map Escape to stopping an active request", async () => {
+    const user = userEvent.setup();
+    const { container } = await renderApp();
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+
+    await user.type(composer, "Escape must not stop{enter}");
+    const stop = await screen.findByRole("button", { name: "Stop generation" });
+    await user.keyboard("{Escape}");
+    expect(stop).toBeVisible();
+    expect(container.querySelector('[data-message-status="interrupted"]')).toBeNull();
+
+    await user.click(stop);
+    await waitFor(() =>
+      expect(container.querySelector('[data-message-status="interrupted"]')).toBeInTheDocument(),
+    );
   });
 
   it("shows retry countdown and attempt details while allowing the wait to be stopped", async () => {
@@ -145,8 +162,8 @@ describe("App", () => {
     const composer = await screen.findByRole("textbox", { name: "Message" });
     await user.type(composer, "Use Responses{enter}");
 
-    expect(await screen.findByText(/Responses endpoint uses the same registry/)).toBeVisible();
     expect(await screen.findByRole("button", { name: "Regenerate response" })).toBeVisible();
+    expect(screen.getByText(/Responses endpoint uses the same registry/)).toBeVisible();
     expect(screen.getAllByText(/Reasoning summary/).length).toBeGreaterThan(0);
     const processSummary = screen
       .getByRole("region", { name: "Provider process" })
@@ -159,7 +176,9 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Open source Phase 7 source" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Open process details" }));
-    expect(screen.getByRole("dialog", { name: "Process details" })).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Process details" })).toBeVisible(),
+    );
     expect(screen.getByText("tool result")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Close process details" }));
     await waitFor(() =>
@@ -217,6 +236,66 @@ describe("App", () => {
 
     await screen.findByText(/Checking the local fixture/);
     expect(userRow?.getAttribute("data-render-count")).toBe(before);
+  });
+
+  it("edits into a new user branch and restores complete sibling paths", async () => {
+    const user = userEvent.setup();
+    await renderApp();
+    const composer = await screen.findByRole("textbox", { name: "Message" });
+    await user.type(composer, "Original branch text{enter}");
+    await screen.findByRole("button", { name: "Regenerate response" });
+
+    await user.click(screen.getByRole("button", { name: "Edit message" }));
+    const editor = screen.getByRole("textbox", { name: "Edit message" });
+    await user.clear(editor);
+    await user.type(editor, "Edited branch text");
+    await user.click(screen.getByRole("button", { name: "Save edited message as a new branch" }));
+    await screen.findByRole("button", { name: "Stop generation" });
+    await screen.findByText("2 / 2");
+    await screen.findByRole("button", { name: "Regenerate response" });
+    expect(screen.getByText("Edited branch text")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Previous sibling" }));
+    expect(await screen.findByText("Original branch text")).toBeVisible();
+    expect(await screen.findByText(/Phase 5 pipeline/)).toBeVisible();
+    expect(screen.queryByText("Edited branch text")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next sibling" }));
+    expect(await screen.findByText("Edited branch text")).toBeVisible();
+    expect(screen.queryByText("Original branch text")).not.toBeInTheDocument();
+  });
+
+  it("supports search shortcuts, archive restore, and keyboard conversation creation", async () => {
+    const user = userEvent.setup();
+    await renderApp();
+    const search = screen.getByRole("searchbox", { name: "Search conversations" });
+
+    fireEvent.keyDown(window, { ctrlKey: true, key: "k" });
+    expect(search).toHaveFocus();
+    await user.type(search, "Phase 5");
+    const conversationNav = screen.getByRole("navigation", { name: "Conversations" });
+    expect(
+      await within(conversationNav).findByRole("button", { name: /Phase 5 local fixture/ }),
+    ).toBeVisible();
+
+    await user.clear(search);
+    await user.click(screen.getByRole("button", { name: "Archive conversation" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Archive conversation" }),
+      ).not.toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "Archived" }));
+    expect(await screen.findByRole("button", { name: "Restore conversation" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Restore conversation" }));
+    await user.click(screen.getByRole("button", { name: "Recent" }));
+    expect(await screen.findByRole("heading", { name: "Phase 5 local fixture" })).toBeVisible();
+
+    fireEvent.keyDown(window, { ctrlKey: true, key: "n" });
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "New conversation" }),
+    ).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "New conversation" })).toHaveLength(2);
   });
 
   it("opens appearance settings and applies a fixed dark theme", async () => {

@@ -248,10 +248,11 @@ Phase 1 已完成：
 - **Phase 2A（已验证）**：共享 `PipeRequest`/`PipeEvent` fixture、真实 Tauri 流式 bridge、Rust HTTP/SSE 成功路径和随机端口本地 server 已建立；最终 URL、显式端口、Method、Header、Query 和 Body 原样发送，原始 SSE data 顺序不变。
 - **Phase 2B（已验证）**：Rust Channel 高频假 SSE 以 30ms/64 事件/256 KiB payload 合批；cancel、timeout、非 2xx、断流和 Channel 关闭后的运行映射/reader/timer/token 清理，以及随机分片和大 batch 停止延迟均有确定性测试。
 - **Phase 3（已验证）**：tauri-plugin-sql migration、单语句原子事务边界、临时 SQLite 文件 fixture、MessageBlock/分支/恢复与稳定游标分页已建立；FTS5 按当前最小阶段范围继续延后。
-- **Phase 5-6**：多端口/多 profile 与显示品牌和协议不一致的构造请求验证。
-- **Phase 8**：React/Zustand selector 重渲染、markdown-it 缓存和 virtua 动态高度滚动锚点验证。
+- **Phase 4（已验证）**：ContextAssembler、ContextManifest、分支隔离、工具连续性和双 OpenAI serializer wire canary 已建立。
+- **Phase 5-7（已验证）**：OpenAI 双端点聊天、自动重试、动态 Provider 配置、结构化 reasoning/search/source 和 reload 已建立。
+- **Phase 8（已验证）**：Zustand 有界历史窗口、markdown-it 缓存/节流、Shiki/KaTeX 懒加载、virtua 动态高度列表、侧栏直接操控、React render 隔离、快速滚动和资源曲线门禁已通过。
 
-Phase 1 已完成交互 spike、平台端口 fake 和质量基础设施；Phase 2 已完成通用传输、合批、取消、错误与资源清理；Phase 3 已完成 SQLite 数据权威层，但仍未加入 Provider codec、ContextAssembler、真实聊天或自动重试。Phase 4 及后续条目仍是对应阶段的未完成任务。
+Phase 1-8 已按路线完成对应技术纵切。Phase 9 多协议 codec 可以在当前已验证基线上开始；发布候选仍需执行性能规范中的长时间 soak。
 
 ## 15. 替换边界
 

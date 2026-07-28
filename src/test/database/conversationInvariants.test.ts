@@ -119,6 +119,36 @@ describe("conversation persistence invariants", () => {
       regenerated.id,
     );
 
+    expect(
+      await repository.listMessageSiblingInfo([
+        first.userMessage.id,
+        editedFirstTurn.userMessage.id,
+        editedFirstTurn.assistantMessage.id,
+        regenerated.id,
+      ]),
+    ).toEqual([
+      {
+        messageId: first.userMessage.id,
+        siblingIds: [first.userMessage.id, editedFirstTurn.userMessage.id],
+        index: 0,
+      },
+      {
+        messageId: editedFirstTurn.userMessage.id,
+        siblingIds: [first.userMessage.id, editedFirstTurn.userMessage.id],
+        index: 1,
+      },
+      {
+        messageId: editedFirstTurn.assistantMessage.id,
+        siblingIds: [editedFirstTurn.assistantMessage.id, regenerated.id],
+        index: 0,
+      },
+      {
+        messageId: regenerated.id,
+        siblingIds: [editedFirstTurn.assistantMessage.id, regenerated.id],
+        index: 1,
+      },
+    ]);
+
     const branch = await repository.listActiveBranchPage(conversation.id);
     expect(new Set(branch.messages.map((message) => message.id))).toEqual(
       new Set([editedFirstTurn.userMessage.id, regenerated.id]),
@@ -334,6 +364,92 @@ describe("conversation persistence invariants", () => {
     expect(new Set(actualIds)).toHaveLength(500);
     expect([...actualIds].sort()).toEqual([...expectedIds].sort());
     expect(actualIds).not.toContain(rootMessageId(conversation.id));
+  });
+
+  it("uses the cursor tuple to locate chain depth when a user leaf splits equal-time parents", async () => {
+    const conversation = await createConversation(repository, "conversation-user-leaf-cursor");
+    const first = await createTurn(
+      repository,
+      conversation.id,
+      rootMessageId(conversation.id),
+      "z-parent-user",
+      "a-parent-assistant",
+      FIXTURE_TIME + 1,
+    );
+    const second = await createTurn(
+      repository,
+      conversation.id,
+      first.assistantMessage.id,
+      "leaf-user",
+      "unused-leaf-assistant",
+      FIXTURE_TIME + 2,
+    );
+    await repository.setActiveLeaf(conversation.id, second.userMessage.id, FIXTURE_TIME + 3);
+
+    const ids: string[] = [];
+    let cursor = null;
+    do {
+      const page = await repository.listActiveBranchPage(conversation.id, cursor, 1);
+      ids.push(...page.messages.map((message) => message.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    expect(ids).toEqual([second.userMessage.id, first.assistantMessage.id, first.userMessage.id]);
+  });
+
+  it("searches titles and JSON message text while keeping archived results isolated", async () => {
+    const titleConversation = await createConversation(repository, "conversation-search-title");
+    await repository.updateConversationMetadata({
+      ...titleConversation,
+      title: "Needle title",
+      updatedAt: FIXTURE_TIME + 10,
+    });
+    const messageConversation = await createConversation(repository, "conversation-search-message");
+    const turn = await createTurn(
+      repository,
+      messageConversation.id,
+      rootMessageId(messageConversation.id),
+      "search-user",
+      "search-assistant",
+      FIXTURE_TIME + 20,
+    );
+    await repository.updateMessage(
+      turn.assistantMessage.id,
+      "done",
+      {
+        version: 1,
+        blocks: [
+          { type: "thinking", text: "Needle inside provider summary", visibility: "summary" },
+        ],
+      },
+      FIXTURE_TIME + 21,
+    );
+
+    const activeResults = await repository.searchConversations("needle");
+    expect(activeResults).toEqual([
+      expect.objectContaining({
+        conversationId: messageConversation.id,
+        messageId: turn.assistantMessage.id,
+        role: "assistant",
+      }),
+      expect.objectContaining({ conversationId: titleConversation.id, messageId: null }),
+    ]);
+
+    await repository.updateConversationMetadata({
+      ...(await repository.getConversation(messageConversation.id))!,
+      archived: true,
+      updatedAt: FIXTURE_TIME + 30,
+    });
+    expect((await repository.listConversations()).map((value) => value.id)).not.toContain(
+      messageConversation.id,
+    );
+    expect((await repository.listConversations(true)).map((value) => value.id)).toContain(
+      messageConversation.id,
+    );
+    expect(await repository.searchConversations("needle", false)).toHaveLength(1);
+    expect(await repository.searchConversations("needle", true)).toEqual([
+      expect.objectContaining({ conversationId: messageConversation.id, archived: true }),
+    ]);
   });
 });
 

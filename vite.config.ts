@@ -14,6 +14,9 @@ export default defineConfig({
     },
   },
   clearScreen: false,
+  build: {
+    manifest: true,
+  },
   server: {
     host: tauriHost || "127.0.0.1",
     port: 1420,

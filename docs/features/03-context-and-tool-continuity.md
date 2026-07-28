@@ -3,7 +3,7 @@
 ## 状态
 
 - 里程碑：MVP
-- 当前状态：`specified`
+- 当前状态：`in_progress`；Phase 4 已验证 SQLite parent 链、分支隔离、ContextManifest、OpenAI Chat/Responses serializer、最终 wire canary、UI 50/DB 500 隔离和 lossless 预算预检。Anthropic/Gemini/custom codec 的同等连续性仍属于 Phase 9，完整跨协议 MVP 尚未完成
 - 发布级别：P0 阻断能力
 
 ## 用户问题

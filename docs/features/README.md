@@ -8,9 +8,9 @@
 |---|---|---|---|
 | 01 | [核心聊天与分支](./01-core-chat-and-branching.md) | MVP/V1 | `in_progress` / `deferred` |
 | 02 | [Provider 与模型管理](./02-provider-and-model-management.md) | MVP | `in_progress`（Phase 6 slice `verified`） |
-| 03 | [上下文与工具连续性](./03-context-and-tool-continuity.md) | MVP | `specified` |
+| 03 | [上下文与工具连续性](./03-context-and-tool-continuity.md) | MVP | `in_progress`（Phase 4 OpenAI slice `verified`） |
 | 04 | [思考、搜索与信源](./04-reasoning-search-and-sources.md) | MVP | `in_progress` |
-| 05 | [会话库与搜索](./05-conversation-library-and-search.md) | MVP | `specified` |
+| 05 | [会话库与搜索](./05-conversation-library-and-search.md) | MVP | `in_progress`（Phase 8 slice `verified`） |
 | 06 | [设置、个性化与本地数据](./06-settings-security-and-data.md) | MVP | `specified` |
 | 07 | [附件与视觉模型](./07-attachments-and-vision.md) | V1 | `deferred` |
 | 08 | [提示词与助手预设](./08-prompts-and-assistants.md) | V1 | `deferred` |

@@ -39,6 +39,7 @@ export class BrowserFixtureBridge implements DesktopBridge {
       const responses = Array.isArray(body.input);
       const retryKey = request.body ?? "";
       const retryFixture = retryKey.includes("Retry UI");
+      const explicitStopFixture = retryKey.includes("Stop with the keyboard");
       const retryAttempt = retryFixture ? (this.retryAttempts.get(retryKey) ?? 0) + 1 : 0;
       if (retryFixture) {
         this.retryAttempts.set(retryKey, retryAttempt);
@@ -67,7 +68,7 @@ export class BrowserFixtureBridge implements DesktopBridge {
                 resolve();
               }
             },
-            90 + index * 90,
+            90 + index * (explicitStopFixture ? 2_500 : 90),
           ),
         );
       });

@@ -263,6 +263,22 @@ export interface MessagePage {
   nextCursor: MessageCursor | null;
 }
 
+export interface MessageSiblingInfo {
+  messageId: string;
+  siblingIds: string[];
+  index: number;
+}
+
+export interface ConversationSearchResult {
+  conversationId: string;
+  title: string;
+  archived: boolean;
+  messageId: string | null;
+  role: Exclude<MessageRole, "root"> | null;
+  snippet: string;
+  updatedAt: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -54,8 +54,18 @@ export interface ActiveRequestPersistence {
 
 export interface ActiveRequestRegistryOptions {
   createId?: () => string;
+  maxRetainedTerminalEntries?: number;
   random?: () => number;
   schedule?: (delayMs: number, callback: () => void) => () => void;
+}
+
+export interface ActiveRequestRegistryDiagnostics {
+  activeEntries: number;
+  entries: number;
+  retryTimers: number;
+  subscribers: number;
+  terminalEntries: number;
+  transportOwners: number;
 }
 
 interface AttemptRuntime {
@@ -85,11 +95,13 @@ const DEFAULT_SCHEDULE = (delayMs: number, callback: () => void) => {
 };
 
 const UTF8_ENCODER = new TextEncoder();
+const DEFAULT_MAX_RETAINED_TERMINAL_ENTRIES = 32;
 
 export class ActiveRequestRegistry {
   private readonly entries = new Map<string, RegistryEntry>();
   private readonly transportOwners = new Map<string, string>();
   private readonly createId: () => string;
+  private readonly maxRetainedTerminalEntries: number;
   private readonly random: () => number;
   private readonly schedule: (delayMs: number, callback: () => void) => () => void;
 
@@ -100,6 +112,10 @@ export class ActiveRequestRegistry {
     options: ActiveRequestRegistryOptions = {},
   ) {
     this.createId = options.createId ?? (() => crypto.randomUUID());
+    this.maxRetainedTerminalEntries = Math.max(
+      0,
+      Math.floor(options.maxRetainedTerminalEntries ?? DEFAULT_MAX_RETAINED_TERMINAL_ENTRIES),
+    );
     this.random = options.random ?? Math.random;
     this.schedule = options.schedule ?? DEFAULT_SCHEDULE;
   }
@@ -228,8 +244,21 @@ export class ActiveRequestRegistry {
   latestForConversation(conversationId: string): StreamingMessageState | null {
     const entry = [...this.entries.values()]
       .filter((candidate) => candidate.dispatch.userMessage.conversationId === conversationId)
-      .sort((left, right) => right.state.startedAt - left.state.startedAt)[0];
+      .sort((left, right) => left.state.startedAt - right.state.startedAt)
+      .at(-1);
     return entry ? cloneState(entry.state) : null;
+  }
+
+  diagnostics(): ActiveRequestRegistryDiagnostics {
+    const entries = [...this.entries.values()];
+    return {
+      activeEntries: entries.filter((entry) => !isTerminalStatus(entry.state.status)).length,
+      entries: entries.length,
+      retryTimers: entries.filter((entry) => entry.cancelRetryTimer !== null).length,
+      subscribers: entries.reduce((total, entry) => total + entry.subscribers.size, 0),
+      terminalEntries: entries.filter((entry) => isTerminalStatus(entry.state.status)).length,
+      transportOwners: this.transportOwners.size,
+    };
   }
 
   whenTerminal(requestId: string): Promise<StreamingMessageState> {
@@ -245,6 +274,12 @@ export class ActiveRequestRegistry {
     if (!entry || !isTerminalStatus(entry.state.status)) {
       return;
     }
+    this.deleteEntry(entry);
+  }
+
+  private deleteEntry(entry: RegistryEntry): void {
+    this.cancelWaitingTimer(entry);
+    entry.subscribers.clear();
     this.entries.delete(entry.logicalRequestId);
     for (const [transportRequestId, owner] of this.transportOwners) {
       if (owner === entry.logicalRequestId) {
@@ -798,6 +833,16 @@ export class ActiveRequestRegistry {
     entry.resolved = true;
     this.cancelWaitingTimer(entry);
     entry.resolveTerminal(cloneState(entry.state));
+    this.pruneTerminalEntries();
+  }
+
+  private pruneTerminalEntries(): void {
+    const removable = [...this.entries.values()].filter(
+      (entry) => isTerminalStatus(entry.state.status) && entry.subscribers.size === 0,
+    );
+    const overflow = removable.length - this.maxRetainedTerminalEntries;
+    if (overflow <= 0) return;
+    removable.slice(0, overflow).forEach((entry) => this.deleteEntry(entry));
   }
 
   private notify(entry: RegistryEntry): void {
