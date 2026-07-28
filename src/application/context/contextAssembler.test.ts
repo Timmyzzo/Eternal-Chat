@@ -187,15 +187,36 @@ describe("ContextAssembler", () => {
 
   it.each([
     ["context_unknown_message_block", { type: "future_block", value: "preserved" }],
-    [
-      "context_unsupported_message_block",
-      { type: "thinking", text: "summary", visibility: "provider_returned" },
-    ],
     ["context_invalid_message_block", { type: "text", value: "missing text" }],
   ] as const)("returns %s instead of silently dropping a bad block", async (code, block) => {
     await expectAssemblerError(code, "assistant-bad-block", "assistant", [
       block as unknown as MessageBlock,
     ]);
+  });
+
+  it("excludes display-only process blocks while retaining replayable tool results and text", async () => {
+    const context = await assembleSingleMessage("assistant-display-only", "assistant", [
+      { type: "thinking", text: "summary", visibility: "summary" },
+      toolCall("search-1", "succeeded", { sources: ["source-1"] }),
+      { type: "source", id: "source-1", url: "https://example.com" },
+      { type: "citation", sourceId: "source-1", marker: "1" },
+      { type: "provider_state", provider: "fixture", purpose: "response_id", data: "resp-1" },
+      { type: "text", text: "Final answer" },
+    ]);
+
+    expect(context.turns[0]?.blocks.map((block) => block.type)).toEqual(["tool_call", "text"]);
+    expect(context.turns[0]?.blocks[0]).toMatchObject({
+      id: "search-1",
+      modelContent: { sources: ["source-1"] },
+    });
+    expect(context.manifest.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ blockType: "thinking", decision: "excluded" }),
+        expect.objectContaining({ blockType: "source", decision: "excluded" }),
+        expect.objectContaining({ blockType: "citation", decision: "excluded" }),
+        expect.objectContaining({ blockType: "provider_state", decision: "excluded" }),
+      ]),
+    );
   });
 
   it("rejects a tool block on a user message", async () => {

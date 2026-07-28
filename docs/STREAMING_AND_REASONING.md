@@ -1,5 +1,9 @@
 # 流式、思考与搜索事件规范
 
+## 当前实现状态
+
+Phase 7 已于 2026-07-28 完成并验证：OpenAI-compatible Chat/Responses 已具备结构化 thinking/tool/result/source/citation/agent/metadata 事件、稳定 ID reducer、有界本地时间线、低频持久化检查点、取消/断流保留和 reload 一致性。Anthropic/Gemini 完整网络 parser 仍按路线图留在 Phase 9。
+
 ## 1. 目标
 
 流式层必须把 Provider 的原始事件可靠地转换成可渲染、可持久化、可恢复的语义事件，同时保持顺序、关联 ID、时间和错误。对 Grok 等会返回搜索、工具和代理轨迹的接口，不能只提取最终文本。

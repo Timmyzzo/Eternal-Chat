@@ -3,7 +3,7 @@
 ## 状态
 
 - 里程碑：MVP
-- 当前状态：`in_progress`；Phase 5 已验证两种 OpenAI-compatible 协议的基础 reasoning/usage 流式块，Phase 6 仅完成 Provider 内置搜索工具 descriptor 与 wire fixture。搜索过程、来源、计时和完整结构化事件属于 Phase 7，当前尚未开始
+- 当前状态：`in_progress`；Phase 7 已完成并验证 OpenAI-compatible Chat/Responses 的结构化 reasoning lifecycle、Grok 风格 web/X search fixture、工具结果、来源/引用、agent/rollout metadata、本地计时、取消保留、SQLite reload 和详情 UI。Anthropic/Gemini 实际网络 parser 与各自官方搜索事件仍属于 Phase 9，因此完整跨品牌 MVP 状态暂不改为 `verified`
 - 参考方向：NBSearch 的结构化事件思路，从零实现
 
 ## 用户问题
@@ -104,5 +104,13 @@
 - 完成/reload 后详情相同。
 - UI 文案不声称展示 Provider 未返回的内部链。
 - 相关工具结果可进入下一轮上下文或由可靠 anchor 续接。
+
+## Phase 7 退出证据
+
+- 同一 reducer fixture 覆盖 reasoning/text/tool/source 交错、两个并行工具按 call id 反序完成、重复来源跨工具关联、正文后 citation、cancel 保留和确定性时间线。
+- Responses fixture 保存实际 query、tool result、source、citation、agent/rollout 和 response id；未知 typed event 保存为 `compatibility_warning` metadata 后继续解析，不再把未知事件误当正文或直接清空已收内容。
+- streaming 与 reload 共用同一 `MessageBlocks` 结构；时间线最多保留最近 512 个规范化事件条目，记录本地 `seq/ts/type/details`，不复制 raw SSE 或凭据。
+- 展示层区分 `Reasoning summary`、`Provider reasoning`、`Search and tools` 与本地时长，并固定说明不展示 Provider 未返回的隐藏内部思维。
+- 完成的 Provider 工具结果以 `modelContent` 显式 replay；thinking/source/citation/provider metadata 只作为展示和 anchor 证据进入 manifest 的 `excluded` 项，不被错误序列化为普通正文。
 
 详细事件协议见 [流式、思考与搜索事件规范](../STREAMING_AND_REASONING.md)。

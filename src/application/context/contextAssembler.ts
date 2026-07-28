@@ -158,11 +158,16 @@ export class ContextAssembler {
       const canonicalBlocks: CanonicalBlock[] = [];
       for (const [blockIndex, block] of message.blocks.blocks.entries()) {
         const canonical = await canonicalizeBlock(message, block, blockIndex, seenToolCallIds);
-        canonicalBlocks.push(canonical.block);
+        if (canonical.block) {
+          canonicalBlocks.push(canonical.block);
+        }
         manifestItems.push(canonical.manifestItem);
       }
 
       if (canonicalBlocks.length === 0) {
+        if (message.role === "assistant") {
+          continue;
+        }
         throw contractError(
           "context_invalid_message_block",
           `Message ${message.id} has no context blocks`,
@@ -271,7 +276,7 @@ async function canonicalizeBlock(
   block: MessageBlock,
   blockIndex: number,
   seenToolCallIds: Set<string>,
-): Promise<{ block: CanonicalBlock; manifestItem: ContextManifestItem }> {
+): Promise<{ block: CanonicalBlock | null; manifestItem: ContextManifestItem }> {
   if (!isRecord(block) || typeof block.type !== "string") {
     throw invalidBlock(message.id, blockIndex, "Block must be an object with a string type");
   }
@@ -370,6 +375,30 @@ async function canonicalizeBlock(
         canonicalContent(canonical),
         block.id,
       ),
+    };
+  }
+
+  if (
+    block.type === "thinking" ||
+    block.type === "source" ||
+    block.type === "citation" ||
+    block.type === "error" ||
+    block.type === "provider_state"
+  ) {
+    if (message.role !== "assistant") {
+      throw incompatibleBlock(message, blockIndex, block.type);
+    }
+    return {
+      block: null,
+      manifestItem: {
+        blockIndex,
+        blockType: block.type,
+        contentHash: await hashStableJson(block as JsonValue),
+        decision: "excluded",
+        messageId: message.id,
+        reason: "display_only_not_replayed",
+        toolCallId: null,
+      },
     };
   }
 

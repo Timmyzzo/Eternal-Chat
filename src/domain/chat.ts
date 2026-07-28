@@ -8,12 +8,18 @@ export type MessageStatus =
 export interface TextBlock {
   type: "text";
   text: string;
+  blockId?: string;
 }
 
 export interface ThinkingBlock {
   type: "thinking";
   text: string;
   visibility: string;
+  blockId?: string;
+  label?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  durationMs?: number;
   signature?: string;
   meta?: JsonObject;
 }
@@ -43,16 +49,31 @@ export interface ToolCallBlock {
 export interface SourceBlock {
   type: "source";
   id: string;
-  url: string;
+  kind?: "web" | "x_post" | "file" | "database" | "other";
+  url?: string;
   title?: string;
   toolCallId?: string;
+  toolCallIds?: string[];
+  preview?: string;
+  favicon?: string;
+  authorName?: string;
+  authorHandle?: string;
+  publishedAt?: string;
+  receivedAt?: number;
+  providerMeta?: JsonObject;
 }
 
 export interface CitationBlock {
   type: "citation";
+  id?: string;
   sourceId: string;
   marker?: string;
   range?: JsonObject;
+  url?: string;
+  title?: string;
+  toolCallId?: string;
+  receivedAt?: number;
+  providerMeta?: JsonObject;
 }
 
 export interface ImageBlock {
@@ -78,9 +99,11 @@ export interface ErrorBlock {
 
 export interface ProviderStateBlock {
   type: "provider_state";
+  id?: string;
   provider: string;
   purpose: string;
   data: JsonValue;
+  receivedAt?: number;
 }
 
 export interface UnknownMessageBlock {
@@ -100,9 +123,17 @@ export type MessageBlock =
   | ProviderStateBlock
   | UnknownMessageBlock;
 
+export interface MessageTimelineEntry {
+  seq: number;
+  ts: number;
+  type: string;
+  details: JsonObject;
+}
+
 export interface MessageBlocks {
   version: 1;
   blocks: MessageBlock[];
+  timeline?: MessageTimelineEntry[];
 }
 
 export const EMPTY_MESSAGE_BLOCKS: MessageBlocks = { version: 1, blocks: [] };

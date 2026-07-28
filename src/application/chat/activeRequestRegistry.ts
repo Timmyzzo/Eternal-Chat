@@ -68,6 +68,7 @@ interface RegistryEntry {
   current: AttemptRuntime;
   dispatch: PreparedDispatch;
   logicalRequestId: string;
+  lastCheckpointAt: number | null;
   queue: Promise<void>;
   resolved: boolean;
   resolveTerminal: (state: StreamingMessageState) => void;
@@ -139,6 +140,7 @@ export class ActiveRequestRegistry {
       current: { parser: dispatch.parser(), record: initialAttempt },
       dispatch,
       logicalRequestId,
+      lastCheckpointAt: null,
       queue: Promise.resolve(),
       resolved: false,
       resolveTerminal,
@@ -350,6 +352,30 @@ export class ActiveRequestRegistry {
       entry.current.record.completedAt = occurredAt;
       this.syncAttemptState(entry);
       await this.persistRunningTerminal(entry, "completed", null, null, null);
+    } else {
+      await this.checkpointIfDue(entry, occurredAt);
+    }
+  }
+
+  private async checkpointIfDue(entry: RegistryEntry, occurredAt: number): Promise<void> {
+    if (
+      isTerminalStatus(entry.state.status) ||
+      (entry.lastCheckpointAt !== null &&
+        occurredAt - entry.lastCheckpointAt < 500 &&
+        entry.state.eventSeq % 16 !== 0)
+    ) {
+      return;
+    }
+    entry.lastCheckpointAt = occurredAt;
+    try {
+      await this.repository.updateMessage(
+        entry.state.assistantMessageId,
+        entry.state.status,
+        entry.state.blocks,
+        occurredAt,
+      );
+    } catch {
+      // A terminal transaction remains authoritative; a missed checkpoint must not abort the stream.
     }
   }
 
@@ -922,12 +948,26 @@ function storageFailedState(
 }
 
 function providerAnchor(state: StreamingMessageState): JsonObject | null {
-  if (!state.responseId && !state.error) {
+  const providerState = state.blocks.blocks.flatMap((block) =>
+    block.type === "provider_state" &&
+    typeof block.purpose === "string" &&
+    Object.prototype.hasOwnProperty.call(block, "data")
+      ? [
+          {
+            id: typeof block.id === "string" ? block.id : block.purpose,
+            purpose: block.purpose,
+            data: block.data,
+          },
+        ]
+      : [],
+  );
+  if (!state.responseId && !state.error && providerState.length === 0) {
     return null;
   }
   return {
     ...(state.responseId ? { responseId: state.responseId } : {}),
     ...(state.error?.details ? { error: state.error.details } : {}),
+    ...(providerState.length > 0 ? { providerState } : {}),
   };
 }
 

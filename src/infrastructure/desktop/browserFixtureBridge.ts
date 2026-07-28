@@ -67,7 +67,7 @@ export class BrowserFixtureBridge implements DesktopBridge {
                 resolve();
               }
             },
-            90 + index * 140,
+            90 + index * 90,
           ),
         );
       });
@@ -128,7 +128,26 @@ function responsesPayloads(requestId: string): PipeEvent[] {
     {
       type: "data",
       requestId,
-      data: [JSON.stringify({ type: "response.created", response: { id: responseId } })],
+      data: [
+        JSON.stringify({
+          type: "response.created",
+          response: {
+            id: responseId,
+            reasoning: { effort: "high", summary: "auto" },
+            rollout_ids: ["rollout-browser-1"],
+          },
+        }),
+      ],
+    },
+    {
+      type: "data",
+      requestId,
+      data: [
+        JSON.stringify({
+          type: "response.reasoning_summary_part.added",
+          item_id: "reasoning-browser-1",
+        }),
+      ],
     },
     {
       type: "data",
@@ -136,7 +155,53 @@ function responsesPayloads(requestId: string): PipeEvent[] {
       data: [
         JSON.stringify({
           type: "response.reasoning_summary_text.delta",
+          item_id: "reasoning-browser-1",
           delta: "Checking the Responses fixture. ",
+        }),
+      ],
+    },
+    {
+      type: "data",
+      requestId,
+      data: [
+        JSON.stringify({
+          type: "response.output_item.added",
+          item: {
+            id: "search-browser-1",
+            type: "web_search_call",
+            status: "in_progress",
+            action: { type: "search", query: "Phase 7 structured search" },
+          },
+        }),
+      ],
+    },
+    {
+      type: "data",
+      requestId,
+      data: [
+        JSON.stringify({
+          type: "response.web_search_call.completed",
+          item_id: "search-browser-1",
+          query: "Phase 7 structured search",
+          results: [
+            {
+              id: "source-phase7",
+              title: "Phase 7 source",
+              url: "https://example.com/phase7",
+              snippet: "A deterministic local source fixture.",
+            },
+          ],
+        }),
+      ],
+    },
+    {
+      type: "data",
+      requestId,
+      data: [
+        JSON.stringify({
+          type: "response.agent_status",
+          rollout_id: "rollout-browser-1",
+          agent: { id: "agent-browser-1", label: "Search agent", status: "completed" },
         }),
       ],
     },
@@ -147,6 +212,35 @@ function responsesPayloads(requestId: string): PipeEvent[] {
         JSON.stringify({
           type: "response.output_text.delta",
           delta: "The Responses endpoint uses the same registry and persistence path.",
+        }),
+      ],
+    },
+    {
+      type: "data",
+      requestId,
+      data: [
+        JSON.stringify({
+          type: "response.output_text.annotation.added",
+          item_id: "search-browser-1",
+          annotation: {
+            type: "url_citation",
+            source_id: "source-phase7",
+            citation_id: "citation-phase7",
+            title: "Phase 7 source",
+            url: "https://example.com/phase7",
+            start_index: 0,
+            end_index: 18,
+          },
+        }),
+      ],
+    },
+    {
+      type: "data",
+      requestId,
+      data: [
+        JSON.stringify({
+          type: "response.reasoning_summary_part.done",
+          item_id: "reasoning-browser-1",
         }),
       ],
     },

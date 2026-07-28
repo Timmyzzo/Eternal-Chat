@@ -146,6 +146,38 @@ describe("App", () => {
     await user.type(composer, "Use Responses{enter}");
 
     expect(await screen.findByText(/Responses endpoint uses the same registry/)).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Regenerate response" })).toBeVisible();
+    expect(screen.getAllByText(/Reasoning summary/).length).toBeGreaterThan(0);
+    const processSummary = screen
+      .getByRole("region", { name: "Provider process" })
+      .querySelector("summary");
+    expect(processSummary).not.toBeNull();
+    expect(processSummary).toHaveTextContent("1 tool · 1 source");
+    expect(screen.getByText("1 citation linked to this answer")).toBeVisible();
+    await user.click(processSummary!);
+    expect(screen.getByText("Phase 7 structured search")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open source Phase 7 source" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Open process details" }));
+    expect(screen.getByRole("dialog", { name: "Process details" })).toBeVisible();
+    expect(screen.getByText("tool result")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Close process details" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Process details" })).not.toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Phase 5 local fixture" }));
+    const newConversationItem = screen
+      .getAllByRole("button", { name: "New conversation" })
+      .find((button) => button.classList.contains("conversation-item"));
+    expect(newConversationItem).toBeDefined();
+    await user.click(newConversationItem!);
+    const reloadedSummary = (
+      await screen.findByRole("region", { name: "Provider process" })
+    ).querySelector("summary");
+    expect(reloadedSummary).not.toBeNull();
+    await user.click(reloadedSummary!);
+    expect(await screen.findByRole("button", { name: "Open source Phase 7 source" })).toBeVisible();
   });
 
   it("regenerates an assistant sibling without duplicating the user message", async () => {

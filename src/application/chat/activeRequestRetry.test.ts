@@ -200,7 +200,13 @@ describe("ActiveRequestRegistry automatic retry", () => {
       {
         name: "source",
         data: "source-marker",
-        parser: () => new StaticParser([{ type: "semantic", kind: "source" }]),
+        parser: () =>
+          new StaticParser([
+            {
+              type: "source",
+              source: { id: "source-1", kind: "web", url: "https://example.com" },
+            },
+          ]),
       },
     ];
 

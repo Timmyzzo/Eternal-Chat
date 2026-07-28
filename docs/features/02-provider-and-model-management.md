@@ -142,4 +142,4 @@
 - compatibility evidence 支持五种状态、Current/Stale、SQLite 查询和用户触发的 OpenAI Chat/Responses 单参数最小探测；HTTP 200 保持 unknown，4xx rejected，5xx/网络错误不误判。
 - Provider 参数错误不会触发自动删字段、降级或隐形重发；临时错误继续只由 Phase 5A RetryPolicy 处理。
 
-Phase 7 未开始；结构化 reasoning/search/source UI 不属于本轮完成项。Anthropic/Gemini 实际网络 parser 仍属于 Phase 9。
+Phase 7 已完成 OpenAI-compatible 结构化 reasoning/search/source 事件与 UI；Anthropic/Gemini 实际网络 parser 仍属于 Phase 9。

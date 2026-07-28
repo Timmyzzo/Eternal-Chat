@@ -231,3 +231,37 @@ test("Phase 6 configures mixed relay endpoints and keeps an unknown Responses mo
   await composer.press("Enter");
   await expect(page.getByText(/Responses endpoint uses the same registry/)).toBeVisible();
 });
+
+test("Phase 7 keeps structured reasoning, search, sources, and the reload timeline", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("combobox", { name: "Model for new conversation" })
+    .selectOption({ label: "Browser Responses fixture" });
+  await page.getByRole("button", { name: "New conversation" }).click();
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await composer.fill("Phase 7 structured process");
+  await composer.press("Enter");
+
+  await expect(page.getByRole("button", { name: "Regenerate response" })).toBeVisible();
+  await page.getByRole("region", { name: "Provider process" }).locator("summary").click();
+  await expect(page.getByText("Phase 7 structured search")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open source Phase 7 source" })).toBeEnabled();
+  await page.getByRole("button", { name: "Open process details" }).click();
+  const details = page.getByRole("dialog", { name: "Process details" });
+  await expect(details).toBeVisible();
+  await expect(details.getByText("tool result")).toBeVisible();
+  await page.getByRole("button", { name: "Close process details" }).click();
+  await expect(details).toBeHidden();
+
+  await page.getByRole("button", { name: "Phase 5 local fixture" }).click();
+  await page.locator(".conversation-item", { hasText: "New conversation" }).click();
+  await page.getByRole("region", { name: "Provider process" }).locator("summary").click();
+  await expect(page.getByRole("button", { name: "Open source Phase 7 source" })).toBeVisible();
+
+  const hasOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(hasOverflow).toBe(false);
+});

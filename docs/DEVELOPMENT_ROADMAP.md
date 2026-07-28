@@ -334,6 +334,8 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 
 ## Phase 7: 结构化思考、搜索和信源
 
+状态：`verified`（2026-07-28）
+
 ### 目标
 
 吸收 NBSearch 的优秀思路，但用本项目统一事件与数据模型从零实现。
@@ -354,6 +356,15 @@ MCP、知识库、附件、复杂路由、插件 API、自动更新发布。
 - 取消/断流保留部分轨迹。
 - UI 不声称展示未返回的内部思维。
 - 下一轮连续性有显式 replay 或可靠 anchor。
+
+### 退出证据
+
+- `StreamDomainEvent` 与确定性 reducer 已扩展为 thinking lifecycle、稳定 ID 的并行 tool call/args/result、source/citation 去重、agent/rollout 状态、metadata、usage 和终态时间线；text、thinking、tool、source 与最终文本按 ID 更新，不依赖数组末项猜测。
+- OpenAI Chat Completions parser 支持 reasoning lifecycle 与分片 tool arguments；Responses parser 支持 reasoning summary、内置 web/X/file search 生命周期、结果、URL citation、agent/rollout metadata、正文后来源，以及未知 typed event 的可见兼容性警告。浏览器 fixture 和本地 HTTP/SSE fixture 均覆盖结构化 Responses 搜索链。
+- streaming assistant 使用低频 SQLite 检查点，done/error/cancel 以现有原子终态事务保存完整 `blocks_json`、有界本地接收时间线、usage、response id 和 Provider anchor；取消/断流保留已收到的思考、工具、来源和正文，restart 后块与时间线一致。
+- UI 将 Provider 返回的 reasoning summary、工具状态/query、agent 状态、来源、引用数和本地耗时与最终正文分区展示；详情 sheet 保留完整有界时间线并明确不声称展示隐藏内部思维。来源只允许 `http/https` 通过 DesktopBridge 打开，无 URL 或不安全协议只展示不可点击记录。
+- ContextAssembler 对 thinking/source/citation/provider_state/error 生成显式 `excluded` manifest 项，同时继续 replay 已完成且含 `modelContent` 的工具结果和最终文本；未知块、未完成工具和缺失模型可见结果仍显式失败。
+- `pnpm verify` 通过 36 个 Vitest 文件共 158 个测试、5 个 contract 文件共 17 个测试、18 个 Playwright 和 23 个 Rust 测试；初始 web assets 为 643.4 KiB raw、188.7 KiB gzip。1280×800 与 900×700 的 Phase 7 E2E 均通过，结构化过程面板与详情 sheet 已完成实际截图检查。
 
 ## Phase 8: 核心聊天交互与长对话性能
 
@@ -624,4 +635,4 @@ Cherry 参考文档与差异说明
 
 ## 6. 当前下一步
 
-Phase 5、Phase 5A 与 Phase 6 已完成并验证。当前按要求停在 Phase 6，Phase 7 未开始；等待用户新指令，不自动进入结构化搜索/信源时间线、Anthropic/Gemini 完整网络 parser、MCP、知识库或其他后续模块。
+Phase 5、Phase 5A、Phase 6 与 Phase 7 已完成并验证。当前按要求停在 Phase 7，Phase 8 未开始；等待用户新指令，不自动进入长对话虚拟列表/完整交互、Anthropic/Gemini 完整网络 parser、MCP、知识库或其他后续模块。

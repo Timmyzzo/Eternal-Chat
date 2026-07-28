@@ -4,7 +4,7 @@
 
 Eternal Chat 是一个以“模型能力不被客户端偷偷削弱”为首要原则的现代 AI 对话桌面客户端。它同时强调高自由度：中转站、端口、协议、端点、模型能力、参数名、参数路径、工具描述和界面体验都可以由用户配置。项目使用 Tauri 2 作为桌面壳，React + TypeScript 负责界面和业务逻辑，Rust 仅承担通用流式网络管道。
 
-当前仓库已完成并验证 **Phase 1 工程脚手架与质量门禁**、**Phase 2 Rust 通用流式管道**、**Phase 3 SQLite、消息块与可恢复状态**、**Phase 4 ContextAssembler 与工具连续性**、**Phase 5 OpenAI 兼容双端点最小聊天纵切**、**Phase 5A 自动重试与请求尝试**和 **Phase 6 全量端点、能力、参数与工具目录**。当前已有 migration v1 基础、migration v2 retry 增量和 migration v3 Provider 配置所有权增量，建立了五层配置模型、来源化官方 preset、tracked/detached 生命周期、结构化 endpoint 字段目录、动态 capability/parameter/tool 表单、Body/Header/Query/path 覆盖、逐字段来源追踪、兼容性证据与用户触发的最小参数探测。Responses 已通过 `grok-4.5` 对第三方 OpenAI-compatible `/v1/responses` 端点的真实流式冒烟；Chat Completions 使用独立本地兼容 HTTP/SSE 端点完成确定性验证，两类证据不混写。本轮 Phase 6 主要依赖确定性 fixture，没有重复使用第三方凭据；Phase 7 尚未开始，完整 MVP 功能仍按各自规格保持 `in_progress`，安全与隐私专题继续为 `deferred`。
+当前仓库已完成并验证 **Phase 1 工程脚手架与质量门禁**、**Phase 2 Rust 通用流式管道**、**Phase 3 SQLite、消息块与可恢复状态**、**Phase 4 ContextAssembler 与工具连续性**、**Phase 5 OpenAI 兼容双端点最小聊天纵切**、**Phase 5A 自动重试与请求尝试**、**Phase 6 全量端点、能力、参数与工具目录**和 **Phase 7 结构化思考、搜索与信源**。当前已有 migration v1 基础、migration v2 retry 增量和 migration v3 Provider 配置所有权增量；Phase 7 复用现有 `blocks_json`，没有新增 migration。应用现已保存并展示 Provider 实际返回的 reasoning summary、工具调用/结果、web/X search、来源、引用、agent/rollout metadata、本地计时与用量，取消/断流保留部分轨迹，reload 后结构一致；未知 Responses typed event 记录兼容性警告而不伪装成正文。Responses 已通过 `grok-4.5` 对第三方 OpenAI-compatible `/v1/responses` 端点的真实流式冒烟；Phase 6–7 的字段、搜索链和 UI 主要使用确定性 fixture，没有重复使用第三方凭据。完整跨品牌 MVP 仍按各自规格保持 `in_progress`，安全与隐私专题继续为 `deferred`。
 
 ## 项目要解决的问题
 
@@ -142,9 +142,9 @@ Eternal Chat 的本地 `main` 仓库已经初始化并关联 [Timmyzzo/Eternal-C
 | 通用网络管道 | Phase 2 已验证：请求透传、增量 SSE、30ms/64 事件/256 KiB 合批、取消/超时/错误、Channel 与资源清理 |
 | 数据权威层 | Phase 3 已验证：migration v1、10 张项目表、MessageBlock、分支/恢复/分页与 RequestSnapshot revision 关联 |
 | 上下文与工具连续性 | Phase 4 已验证：SQLite parent 链、虚拟根排除、sibling 隔离、ContextManifest、双 OpenAI serializer、最终 wire canary、500/50 隔离与预算预检 |
-| 业务代码 | Phase 5、Phase 5A 与 Phase 6 已验证：OpenAI-compatible Chat/Responses 基础聊天与流式解析、有界自动重试、冻结请求、五层 Provider 配置、官方 preset、动态 schema/raw override、兼容性证据和 mixed relay；Anthropic/Gemini 实际网络 codec/parser 仍属于 Phase 9 |
-| 自动化测试 | 157 个 Vitest、17 个 contract 复跑、16 个 Playwright、23 个 Rust 测试；初始 web assets 为 615.9 KiB raw、181.8 KiB gzip；本地协议/重试/SQLite fixture、clippy、license、Tauri debug no-bundle 和双视口视觉门禁通过；Phase 5 真实 Responses 冒烟作为独立补充证据记录 |
+| 业务代码 | Phase 5、Phase 5A、Phase 6 与 Phase 7 已验证：OpenAI-compatible Chat/Responses 基础聊天与流式解析、有界自动重试、冻结请求、五层 Provider 配置、官方 preset、动态 schema/raw override、兼容性证据、mixed relay，以及结构化 reasoning/tool/source/citation 时间线和 reload；Anthropic/Gemini 实际网络 codec/parser 仍属于 Phase 9 |
+| 自动化测试 | 36 个 Vitest 文件共 158 个测试、5 个 contract 文件共 17 个测试、18 个 Playwright 和 23 个 Rust 测试；初始 web assets 为 643.4 KiB raw、188.7 KiB gzip；本地协议/重试/SQLite fixture、clippy、license、Tauri debug no-bundle 和双视口视觉门禁通过；Phase 5 真实 Responses 冒烟作为独立补充证据记录 |
 | Git 仓库 | 本地 `main` 已关联 `origin/main` |
 | 开源许可证 | 待项目所有者在发布前决定 |
 
-Phase 1 的工具链、依赖与 Motion 决定见 [ADR 0001](./docs/decisions/0001-phase-1-toolchain-and-motion.md)。Phase 5 的真实 Responses 冒烟与本地 Chat fixture 继续分开记录；Phase 5A 和 Phase 6 的错误、重试、参数、preset、mixed relay 与兼容性结论来自可重复的本地测试。本次按要求停在 Phase 6，Phase 7 未开始，等待新的明确指令。
+Phase 1 的工具链、依赖与 Motion 决定见 [ADR 0001](./docs/decisions/0001-phase-1-toolchain-and-motion.md)。Phase 5 的真实 Responses 冒烟与本地 Chat fixture 继续分开记录；Phase 5A–7 的错误、重试、参数、preset、mixed relay、结构化搜索链、信源和 reload 结论来自可重复的本地测试。本次按要求停在 Phase 7，Phase 8 未开始，等待新的明确指令。

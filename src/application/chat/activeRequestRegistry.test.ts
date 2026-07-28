@@ -6,7 +6,7 @@ import {
 } from "@/application/chat/activeRequestRegistry";
 import type { PreparedDispatch } from "@/application/chat/requestAssembler";
 import { DEFAULT_RETRY_POLICY } from "@/application/chat/retryPolicy";
-import type { RequestAttempt, RequestSnapshot } from "@/domain/chat";
+import type { MessageBlocks, MessageStatus, RequestAttempt, RequestSnapshot } from "@/domain/chat";
 import type { FinalizeRequestAttemptInput } from "@/infrastructure/db/phase3Repository";
 import { FakeDesktopBridge } from "@/infrastructure/desktop/fakeDesktopBridge";
 import { ChatCompletionsStreamParser } from "@/infrastructure/providers/openai/streamParsers";
@@ -57,6 +57,10 @@ describe("ActiveRequestRegistry", () => {
       status: "done",
       providerResponseId: "provider-response",
     });
+    expect(persistence.checkpoints[0]).toMatchObject({
+      status: "streaming",
+      blocks: { timeline: [expect.objectContaining({ type: "started" })] },
+    });
     expect(snapshots).toContain("streaming");
     expect(snapshots.at(-1)).toBe("done");
   });
@@ -100,7 +104,7 @@ describe("ActiveRequestRegistry", () => {
     });
 
     expect(terminal.status).toBe("interrupted");
-    expect(terminal.blocks.blocks[0]).toEqual({ type: "text", text: "partial" });
+    expect(terminal.blocks.blocks[0]).toMatchObject({ type: "text", text: "partial" });
     expect(bridge.cancelledRequestIds).toEqual([dispatch.transportRequest.requestId]);
     expect(persistence.finalized).toHaveLength(1);
   });
@@ -136,11 +140,42 @@ describe("ActiveRequestRegistry", () => {
     expect(reattached).toEqual(["done"]);
     expect(registry.latestForConversation("conversation-1")?.status).toBe("done");
   });
+
+  it("throttles failed checkpoints without aborting the stream", async () => {
+    const bridge = new FakeDesktopBridge();
+    const persistence = new CapturePersistence(true);
+    let now = 100;
+    const registry = new ActiveRequestRegistry(bridge, persistence, () => ++now);
+    const dispatch = createDispatch("request-checkpoint-failure");
+    registry.start(dispatch);
+    await vi.waitFor(() => expect(bridge.startedRequests).toHaveLength(1));
+
+    bridge.emit({
+      type: "data",
+      requestId: dispatch.transportRequest.requestId,
+      data: [
+        ...Array.from({ length: 17 }, () =>
+          JSON.stringify({ choices: [{ delta: { content: "x" } }] }),
+        ),
+        "[DONE]",
+      ],
+    });
+
+    const terminal = await registry.whenTerminal(dispatch.transportRequest.requestId);
+    expect(terminal).toMatchObject({ status: "done" });
+    expect(terminal.blocks.blocks[0]).toMatchObject({ text: "x".repeat(17), type: "text" });
+    expect(persistence.checkpointAttempts).toBe(2);
+    expect(persistence.finalized).toHaveLength(1);
+  });
 });
 
 class CapturePersistence implements ActiveRequestPersistence {
+  checkpointAttempts = 0;
+  readonly checkpoints: Array<{ blocks: MessageBlocks; status: MessageStatus }> = [];
   readonly finalized: FinalizeRequestAttemptInput[] = [];
   readonly running: Array<[string, string, number]> = [];
+
+  constructor(private readonly failCheckpoints = false) {}
 
   async finalizeRequestAttempt(input: FinalizeRequestAttemptInput): Promise<boolean> {
     this.finalized.push(structuredClone(input));
@@ -163,8 +198,10 @@ class CapturePersistence implements ActiveRequestPersistence {
     throw new Error("automatic retry is not expected in this test");
   }
 
-  async updateMessage(): Promise<void> {
-    throw new Error("fallback message update is not expected in this test");
+  async updateMessage(_id: string, status: MessageStatus, blocks: MessageBlocks): Promise<void> {
+    this.checkpointAttempts += 1;
+    if (this.failCheckpoints) throw new Error("checkpoint unavailable");
+    this.checkpoints.push({ blocks: structuredClone(blocks), status });
   }
 }
 

@@ -327,6 +327,15 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
     [attachDispatch, requestActive, selectedConversationId, service],
   );
 
+  const openExternal = useCallback(
+    (url: string) => {
+      void service
+        .openExternal(url)
+        .catch(() => setError("The source link could not be opened safely."));
+    },
+    [service],
+  );
+
   const createConversation = async () => {
     if (!newConversationModelRef) {
       setError("Configure a connection before creating a conversation.");
@@ -489,11 +498,13 @@ export function App({ runtime }: { runtime: ApplicationRuntime }) {
                 <HistoricalMessage
                   key={message.id}
                   message={message}
+                  onOpenExternal={openExternal}
                   onRegenerate={message.role === "assistant" ? regenerate : undefined}
                 />
               ))}
               {activeState ? (
                 <StreamingMessage
+                  onOpenExternal={openExternal}
                   onStop={currentRequestId ? () => registry.stop(currentRequestId) : undefined}
                   state={activeState}
                 />

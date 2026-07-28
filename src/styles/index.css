@@ -412,6 +412,230 @@ textarea:focus {
   font-weight: 650;
 }
 
+.thinking-block summary {
+  display: flex;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.structured-process {
+  position: relative;
+  margin-bottom: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.structured-process .thinking-block {
+  margin: 0;
+}
+
+.process-truth-note {
+  margin: 0.55rem 0;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.process-warning {
+  margin: 0.55rem 0;
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  color: var(--warning);
+  background: var(--warning-bg);
+  font-size: 0.6875rem;
+}
+
+.reasoning-entry {
+  margin-top: 0.65rem;
+}
+
+.reasoning-entry > strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--foreground);
+  font-size: 0.6875rem;
+}
+
+.process-detail-trigger {
+  min-height: 1.75rem;
+  height: 1.75rem;
+  margin-top: 0.55rem;
+  padding-inline: 0.55rem;
+  font-size: 0.6875rem;
+}
+
+.process-detail-sheet {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.process-timeline {
+  display: grid;
+  gap: 0;
+  margin: 0.75rem 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.process-timeline li {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  padding: 0.45rem 0;
+  font-size: 0.6875rem;
+}
+
+.process-timeline li > span,
+.process-timeline time {
+  color: var(--muted-foreground);
+}
+
+.tool-event-list {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
+
+.tool-event {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface);
+}
+
+.tool-event > div {
+  display: grid;
+  min-width: 0;
+}
+
+.tool-event strong,
+.tool-event span,
+.tool-event output {
+  overflow: hidden;
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-event span,
+.tool-event output {
+  color: var(--muted-foreground);
+}
+
+.tool-event[data-tool-status="succeeded"] output {
+  color: var(--success);
+}
+
+.tool-event[data-tool-status="failed"] output,
+.tool-event[data-tool-status="cancelled"] output {
+  color: var(--danger);
+}
+
+.source-list {
+  margin-top: 0.75rem;
+}
+
+.source-list > header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.6875rem;
+}
+
+.source-list > header span {
+  color: var(--muted-foreground);
+}
+
+.source-pills {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.source-pill {
+  display: grid;
+  grid-template-columns: 1.35rem minmax(0, 1fr) 0.8rem;
+  gap: 0.5rem;
+  align-items: center;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  color: var(--foreground);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.source-pill:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.source-pill > span:first-child {
+  display: grid;
+  width: 1.25rem;
+  height: 1.25rem;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-size: 0.625rem;
+  font-weight: 700;
+}
+
+.source-pill > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+
+.source-pill strong,
+.source-pill small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-pill strong {
+  font-size: 0.6875rem;
+}
+
+.source-pill small,
+.citation-summary,
+.agent-status-list {
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+}
+
+.citation-summary,
+.agent-status-list {
+  margin-top: 0.55rem;
+}
+
+.agent-status-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.agent-status-list span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+  background: var(--surface);
+}
+
 .message-error,
 .composer-alert {
   color: var(--danger);

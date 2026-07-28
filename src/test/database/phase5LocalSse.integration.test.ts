@@ -79,6 +79,21 @@ describe.each([
       expect(terminal.blocks.blocks).toEqual(
         expect.arrayContaining([expect.objectContaining({ type: "text" })]),
       );
+      if (bodyKey === "input") {
+        expect(terminal.blocks.blocks).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: "thinking", visibility: "summary" }),
+            expect.objectContaining({
+              type: "tool_call",
+              id: "local-search-1",
+              status: "succeeded",
+            }),
+            expect.objectContaining({ type: "source", id: "local-source-1" }),
+            expect.objectContaining({ type: "citation", id: "local-citation-1" }),
+          ]),
+        );
+        expect(terminal.blocks.timeline?.some((event) => event.type === "tool_result")).toBe(true);
+      }
       expect(bridge.requests).toHaveLength(1);
       expect(
         redactPipeRequest(bridge.requests[0]!, readAuthBindings(selection.endpoint.authBindings)),
@@ -108,6 +123,14 @@ describe.each([
         endpointId: selection.endpoint.id,
         protocolProfileId: selection.profile.id,
       });
+      if (bodyKey === "input") {
+        expect(snapshot?.providerAnchor).toMatchObject({
+          responseId: "local-responses-id",
+          providerState: expect.arrayContaining([
+            expect.objectContaining({ purpose: "rollout_ids" }),
+          ]),
+        });
+      }
       expect(JSON.stringify(snapshot)).not.toContain(TEST_TOKEN);
 
       const restarted = await initializePersistence(Date.now(), async () => fixture.database);
@@ -120,6 +143,7 @@ describe.each([
         status: "done",
         providerResponseId: assistant?.providerResponseId,
       });
+      expect(restartedMessages.at(-1)?.blocks).toEqual(assistant?.blocks);
     } finally {
       await bridge.close();
       await closeServer(server);
@@ -418,9 +442,60 @@ function writeSseResponse(url: string, response: ServerResponse): void {
   });
   const payloads = url.endsWith("/v1/responses")
     ? [
-        { type: "response.created", response: { id: "local-responses-id" } },
-        { type: "response.reasoning_summary_text.delta", delta: "local reasoning" },
+        {
+          type: "response.created",
+          response: {
+            id: "local-responses-id",
+            reasoning: { effort: "high" },
+            rollout_ids: ["local-rollout-1"],
+          },
+        },
+        {
+          type: "response.reasoning_summary_part.added",
+          item_id: "local-reasoning-1",
+        },
+        {
+          type: "response.reasoning_summary_text.delta",
+          item_id: "local-reasoning-1",
+          delta: "local reasoning",
+        },
+        {
+          type: "response.output_item.added",
+          item: {
+            id: "local-search-1",
+            type: "web_search_call",
+            action: { type: "search", query: "local phase 7" },
+          },
+        },
+        {
+          type: "response.web_search_call.completed",
+          item_id: "local-search-1",
+          query: "local phase 7",
+          results: [
+            {
+              id: "local-source-1",
+              title: "Local source",
+              url: "https://example.com/local-phase7",
+            },
+          ],
+        },
         { type: "response.output_text.delta", delta: "local responses answer" },
+        {
+          type: "response.output_text.annotation.added",
+          item_id: "local-search-1",
+          annotation: {
+            source_id: "local-source-1",
+            citation_id: "local-citation-1",
+            title: "Local source",
+            url: "https://example.com/local-phase7",
+            start_index: 0,
+            end_index: 5,
+          },
+        },
+        {
+          type: "response.reasoning_summary_part.done",
+          item_id: "local-reasoning-1",
+        },
         {
           type: "response.completed",
           response: {

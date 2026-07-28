@@ -198,6 +198,10 @@ export class ChatService {
     this.assembler = new ContextAssembler(repository);
   }
 
+  async openExternal(url: string): Promise<void> {
+    await this.bridge.openExternal(url);
+  }
+
   async ensureProtocolPresets(): Promise<void> {
     const now = this.now();
     for (const preset of createOfficialProtocolPresets(now)) {

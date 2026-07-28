@@ -397,6 +397,8 @@ CREATE TABLE app_setting (
 
 块 schema 变更优先通过读取时迁移和写回新版本完成。不能让 UI 同时长期维护多套不兼容块结构。
 
+Phase 7 在 version 1 envelope 上增加可选 `timeline` 字段，保存最近 512 个规范化本地事件的 `seq`、接收 `ts`、`type` 和受限 `details`。这是向后兼容的加法字段，不保存 raw SSE、认证值或请求正文；没有 timeline 的历史消息仍按原 version 1 读取。
+
 ## 6. 块类型
 
 MVP 允许的核心块：
